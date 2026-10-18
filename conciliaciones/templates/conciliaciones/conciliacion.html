@@ -1,0 +1,104 @@
+{% extends "conciliaciones/base.html" %}
+{% block mainclass %}wide{% endblock %}
+{% block content %}
+<style>
+  .layout{display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start}
+  .side{position:sticky;top:16px}
+  .side h3{margin:0 0 4px}
+  .side fieldset{border:0;border-bottom:1px solid #e5e7eb;padding:0 0 14px;margin:0 0 14px}
+  .dates{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  .actual{font-size:12px;color:#6b7280;margin-top:4px;word-break:break-all}
+  .previews{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .panel{border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff;min-width:0}
+  .panel-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#eef1f6;border-bottom:1px solid #d1d5db}
+  /* equivalente a un JScrollPane: altura fija con barras de desplazamiento */
+  .scroll{height:340px;overflow:auto}
+  table.grid{border-collapse:separate;border-spacing:0;font-size:13px;white-space:nowrap;width:max-content;min-width:100%}
+  table.grid th,table.grid td{padding:6px 10px;border-bottom:1px solid #eef0f3;border-right:1px solid #f1f2f5}
+  table.grid thead th{position:sticky;top:0;background:#e3e8f0;z-index:2}
+  table.grid th.cmp{background:#cfe0f7}
+  table.grid td.cmp{background:#f4f8fe}
+  table.grid .n{color:#9ca3af;text-align:right;width:1%}
+  .stats td:first-child{color:#4b5563}
+  .stats td.v{text-align:right;font-variant-numeric:tabular-nums}
+  .dif{font-size:18px;font-weight:600}
+  .vacio{padding:60px 20px;text-align:center;color:#6b7280}
+  ul.avisos{margin:8px 0 0;padding-left:20px;font-size:14px;color:#92400e}
+  @media(max-width:1100px){.layout{grid-template-columns:1fr}.side{position:static}.previews{grid-template-columns:1fr}}
+</style>
+
+<p style="margin-top:0"><a href="{% url 'home' %}">&larr; Volver al inicio</a></p>
+<h2 style="margin-top:0">{% if object %}Conciliación #{{ object.pk }}{% else %}Nueva conciliación{% endif %}</h2>
+
+<div class="layout">
+  <!-- Barra lateral: archivos y rangos -->
+  <aside class="card side">
+    <form method="post" enctype="multipart/form-data">
+      {% csrf_token %}
+      {{ form.non_field_errors }}
+      <fieldset>
+        <h3>Banco</h3>
+        <div class="dates">
+          <div><label for="{{ form.banco_desde.id_for_label }}">Desde</label>{{ form.banco_desde }}{{ form.banco_desde.errors }}</div>
+          <div><label for="{{ form.banco_hasta.id_for_label }}">Hasta</label>{{ form.banco_hasta }}{{ form.banco_hasta.errors }}</div>
+        </div>
+        <label for="{{ form.banco_archivo.id_for_label }}">Archivo (.csv)</label>
+        {{ form.banco_archivo }}{{ form.banco_archivo.errors }}
+        {% if object %}<div class="actual">Actual: {{ object.nombre_banco }}</div>{% endif %}
+      </fieldset>
+      <fieldset>
+        <h3>Empresa</h3>
+        <div class="dates">
+          <div><label for="{{ form.empresa_desde.id_for_label }}">Desde</label>{{ form.empresa_desde }}{{ form.empresa_desde.errors }}</div>
+          <div><label for="{{ form.empresa_hasta.id_for_label }}">Hasta</label>{{ form.empresa_hasta }}{{ form.empresa_hasta.errors }}</div>
+        </div>
+        <label for="{{ form.empresa_archivo.id_for_label }}">Archivo (.csv)</label>
+        {{ form.empresa_archivo }}{{ form.empresa_archivo.errors }}
+        {% if object %}<div class="actual">Actual: {{ object.nombre_empresa }}</div>{% endif %}
+      </fieldset>
+      <button class="btn" style="width:100%">{% if object %}Actualizar vista previa{% else %}Cargar y previsualizar{% endif %}</button>
+    </form>
+  </aside>
+
+  <!-- Derecha: vista previa + reporte -->
+  <div>
+    <div class="card">
+      <h3>Vista previa</h3>
+      {% if object %}
+        <p class="muted" style="margin-top:0">Las columnas resaltadas son los campos que se comparan (fecha y monto).</p>
+        <div class="previews">
+          {% include "conciliaciones/_panel.html" with titulo="Banco" lado=banco %}
+          {% include "conciliaciones/_panel.html" with titulo="Empresa" lado=empresa %}
+        </div>
+      {% else %}
+        <div class="vacio">Selecciona los archivos y los rangos de fecha en la barra lateral para ver aquí la vista previa.</div>
+      {% endif %}
+    </div>
+
+    <div class="card">
+      <h3>Reporte</h3>
+      {% if object %}
+        <table class="stats">
+          <thead><tr><th></th><th class="v" style="text-align:right">Banco</th><th style="text-align:right">Empresa</th></tr></thead>
+          <tbody>
+            <tr><td>Movimientos</td><td class="v">{{ reporte.banco.movimientos|default_if_none:"–" }}</td><td class="v">{{ reporte.empresa.movimientos|default_if_none:"–" }}</td></tr>
+            <tr><td>Ingresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.ingresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.ingresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
+            <tr><td>Egresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.egresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.egresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
+            <tr><td><strong>Neto</strong></td><td class="v"><strong>{% if reporte.banco %}{{ reporte.banco.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td><td class="v"><strong>{% if reporte.empresa %}{{ reporte.empresa.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td></tr>
+          </tbody>
+        </table>
+        <p class="dif">Diferencia (banco − empresa):
+          {% if reporte.diferencia is not None %}{{ reporte.diferencia|floatformat:2 }}{% else %}<span class="muted">no disponible</span>{% endif %}
+        </p>
+        {% if reporte.avisos %}
+          <strong style="font-size:14px">Avisos</strong>
+          <ul class="avisos">{% for a in reporte.avisos %}<li>{{ a }}</li>{% endfor %}</ul>
+        {% endif %}
+        <p class="muted" style="margin-bottom:0">El análisis detallado (coincidencias y partidas pendientes) se agregará aquí.</p>
+      {% else %}
+        <p class="muted">El reporte aparecerá cuando cargues los archivos.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

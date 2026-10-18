@@ -1,0 +1,7 @@
+Fecha,Descripcion,Referencia,Monto
+2026-10-01,Deposito cliente A,FAC-001,15000.00
+2026-10-02,Pago proveedor X,PAG-010,-4200.50
+2026-10-03,Comision bancaria,,-150.00
+2026-10-05,Transferencia recibida,FAC-002,8300.00
+2026-10-08,Pago nomina,NOM-01,-12000.00
+2026-11-02,Fuera de rango,,-99.00

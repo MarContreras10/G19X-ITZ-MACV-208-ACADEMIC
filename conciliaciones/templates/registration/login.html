@@ -1,0 +1,17 @@
+{% extends "conciliaciones/base.html" %}
+{% block title %}Iniciar sesión{% endblock %}
+{% block content %}
+<div class="card" style="max-width:380px;margin:60px auto">
+  <h3>Iniciar sesión</h3>
+  <form method="post">
+    {% csrf_token %}
+    {% if form.non_field_errors %}<div class="msg error">Usuario o contraseña incorrectos.</div>{% endif %}
+    <label for="id_username">Usuario</label>
+    <input type="text" name="username" id="id_username" autofocus required>
+    <label for="id_password">Contraseña</label>
+    <input type="password" name="password" id="id_password" required>
+    <input type="hidden" name="next" value="{{ next }}">
+    <p><button class="btn" style="width:100%">Entrar</button></p>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,26 @@
+{% extends "conciliaciones/base.html" %}
+{% block content %}
+<div class="top">
+  <h2 style="margin:0">Inicio</h2>
+  <a class="btn" href="{% url 'nueva' %}">+ Nueva conciliación</a>
+</div>
+<div class="card">
+  <h3>Historial de conciliaciones</h3>
+  <table>
+    <thead><tr><th>#</th><th>Creada</th><th>Periodo banco</th><th>Periodo empresa</th><th></th></tr></thead>
+    <tbody>
+    {% for c in conciliaciones %}
+      <tr>
+        <td>{{ c.pk }}</td>
+        <td>{{ c.creada|date:"d/m/Y H:i" }}</td>
+        <td>{{ c.banco_desde|date:"d/m/Y" }} – {{ c.banco_hasta|date:"d/m/Y" }}</td>
+        <td>{{ c.empresa_desde|date:"d/m/Y" }} – {{ c.empresa_hasta|date:"d/m/Y" }}</td>
+        <td><a href="{% url 'conciliacion' c.pk %}">Abrir</a></td>
+      </tr>
+    {% empty %}
+      <tr><td colspan="5" class="muted">Aún no hay conciliaciones.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
