@@ -10,11 +10,8 @@ class Conciliacion(models.Model):
 
     banco_desde = models.DateField("Desde")
     banco_hasta = models.DateField("Hasta")
-    banco_archivo = models.FileField("Archivo del banco", upload_to="banco/%Y/%m/")
-
     empresa_desde = models.DateField("Desde")
     empresa_hasta = models.DateField("Hasta")
-    empresa_archivo = models.FileField("Archivo de la empresa", upload_to="empresa/%Y/%m/")
 
     class Meta:
         ordering = ["-creada"]
@@ -23,10 +20,36 @@ class Conciliacion(models.Model):
     def __str__(self):
         return f"Conciliación #{self.pk}"
 
-    @property
-    def nombre_banco(self):
-        return os.path.basename(self.banco_archivo.name)
+    def archivos_de(self, lado):
+        """Archivos de un lado; el principal siempre va primero."""
+        return self.archivos.filter(lado=lado)
+
+
+def ruta_archivo(instance, filename):
+    return f"{instance.lado.lower()}/{instance.conciliacion_id}/{filename}"
+
+
+class ArchivoConciliacion(models.Model):
+    class Lado(models.TextChoices):
+        BANCO = "BANCO", "Banco"
+        EMPRESA = "EMPRESA", "Empresa"
+
+    conciliacion = models.ForeignKey(Conciliacion, on_delete=models.CASCADE, related_name="archivos")
+    lado = models.CharField(max_length=7, choices=Lado.choices)
+    archivo = models.FileField(upload_to=ruta_archivo)
+    principal = models.BooleanField(default=False)
+    creado = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-principal", "creado", "id"]
+
+    def __str__(self):
+        return f"{self.get_lado_display()}: {self.nombre}"
 
     @property
-    def nombre_empresa(self):
-        return os.path.basename(self.empresa_archivo.name)
+    def nombre(self):
+        return os.path.basename(self.archivo.name)
+
+    def delete(self, *args, **kwargs):
+        self.archivo.delete(save=False)  # también borra el archivo del disco
+        return super().delete(*args, **kwargs)

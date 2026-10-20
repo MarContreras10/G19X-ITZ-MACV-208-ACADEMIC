@@ -84,21 +84,30 @@ def _monto(texto):
     return -valor if negativo else valor
 
 
-def analizar(archivo, desde, hasta):
-    """Lee el archivo, filtra por rango de fechas y calcula totales.
+def analizar(archivos, desde, hasta):
+    """Lee el archivo principal y los complementarios, filtra por rango y calcula totales.
+
+    `archivos` es una lista de ArchivoConciliacion con el principal primero. Los
+    complementarios se alinean al principal por el nombre de sus columnas; las
+    columnas que el principal no tiene se ignoran. Se antepone una columna
+    "Archivo" para saber de dónde viene cada fila.
 
     Convención: monto positivo = ingreso, negativo = egreso. Si el archivo trae
     columnas cargo/abono se usa abono - cargo.
     """
     res = {"error": None, "columnas": [], "filas": [], "total": 0, "mostradas": 0,
            "comparados": [], "avisos": [], "stats": None}
-    try:
-        columnas, filas = leer_tabla(archivo)
-    except ErrorArchivo as e:
-        res["error"] = str(e)
+    if not archivos:
+        res["error"] = "No hay archivos cargados."
         return res
 
-    res["columnas"] = columnas
+    principal, *complementarios = archivos
+    try:
+        columnas, filas_principal = leer_tabla(principal.archivo)
+    except ErrorArchivo as e:
+        res["error"] = f"{principal.nombre}: {e}"
+        return res
+
     i_fecha = _buscar(columnas, ("fecha", "date"))
     i_monto = _buscar(columnas, ("monto", "importe", "amount"))
     i_abono = _buscar(columnas, ("abono", "deposito", "credito"))
@@ -106,8 +115,7 @@ def analizar(archivo, desde, hasta):
     usa_monto = i_monto is not None
     usa_cargo_abono = not usa_monto and i_abono is not None and i_cargo is not None
     calcula = usa_monto or usa_cargo_abono
-
-    res["comparados"] = [i for i in (
+    comparados = [i for i in (
         i_fecha, i_monto if usa_monto else None,
         i_abono if usa_cargo_abono else None, i_cargo if usa_cargo_abono else None,
     ) if i is not None]
@@ -117,10 +125,33 @@ def analizar(archivo, desde, hasta):
     if not calcula:
         res["avisos"].append("No se encontró columna de monto (monto/importe o cargo y abono); no se calcularon totales.")
 
+    # Registros (nombre_de_archivo, fila) en las columnas del principal
+    registros = [(principal.nombre, f) for f in filas_principal]
+    claves = [_norm(c) for c in columnas]
+    for comp in complementarios:
+        try:
+            cols, filas = leer_tabla(comp.archivo)
+        except ErrorArchivo as e:
+            res["avisos"].append(f"{comp.nombre}: {e} Se omitió.")
+            continue
+        indice = {_norm(c): i for i, c in enumerate(cols)}
+        mapa = [indice.get(k) for k in claves]
+        if all(m is None for m in mapa):
+            res["avisos"].append(f"{comp.nombre}: ninguna columna coincide con el archivo principal. Se omitió.")
+            continue
+        faltan = [columnas[i] for i in comparados if mapa[i] is None]
+        if faltan:
+            res["avisos"].append(f"{comp.nombre}: no tiene la(s) columna(s) comparada(s) {', '.join(faltan)}.")
+        extras = [c for c in cols if _norm(c) not in claves]
+        if extras:
+            res["avisos"].append(f"{comp.nombre}: se ignoraron columnas que el principal no tiene ({', '.join(extras)}).")
+        for f in filas:
+            registros.append((comp.nombre, [f[m] if m is not None else "" for m in mapa]))
+
     visibles, sin_interpretar = [], 0
     ingresos = egresos = Decimal("0.00")
     movimientos = 0
-    for fila in filas:
+    for nombre, fila in registros:
         if i_fecha is not None:
             f = _fecha(fila[i_fecha])
             if f is None:
@@ -128,7 +159,7 @@ def analizar(archivo, desde, hasta):
                 continue
             if not (desde <= f <= hasta):
                 continue
-        visibles.append(fila)
+        visibles.append([nombre] + fila)
         if not calcula:
             continue
         if usa_monto:
@@ -148,6 +179,8 @@ def analizar(archivo, desde, hasta):
     if sin_interpretar:
         res["avisos"].append(f"{sin_interpretar} fila(s) no se pudieron interpretar (fecha o monto inválidos).")
 
+    res["columnas"] = ["Archivo"] + columnas
+    res["comparados"] = [i + 1 for i in comparados]  # +1 por la columna "Archivo"
     res["total"] = len(visibles)
     res["filas"] = visibles[:MAX_FILAS_VISTA]
     res["mostradas"] = len(res["filas"])
@@ -155,7 +188,6 @@ def analizar(archivo, desde, hasta):
         res["stats"] = {"movimientos": movimientos, "ingresos": ingresos,
                         "egresos": egresos, "neto": ingresos + egresos}
     return res
-
 
 def reporte(banco, empresa):
     r = {"banco": banco["stats"], "empresa": empresa["stats"], "diferencia": None,

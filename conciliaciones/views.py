@@ -1,11 +1,15 @@
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
+from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse_lazy
+from django.views import View
 from django.views.generic import CreateView, ListView, UpdateView
 
 from . import services
 from .forms import ConciliacionForm
-from .models import Conciliacion
+from .models import ArchivoConciliacion, Conciliacion
+
+Lado = ArchivoConciliacion.Lado
 
 
 class MisConciliaciones(LoginRequiredMixin):
@@ -27,9 +31,12 @@ class VistaPreviaMixin:
         ctx = super().get_context_data(**kwargs)
         obj = getattr(self, "object", None)
         if obj and obj.pk:
-            banco = services.analizar(obj.banco_archivo, obj.banco_desde, obj.banco_hasta)
-            empresa = services.analizar(obj.empresa_archivo, obj.empresa_desde, obj.empresa_hasta)
-            ctx.update(banco=banco, empresa=empresa, reporte=services.reporte(banco, empresa))
+            archivos_banco = list(obj.archivos_de(Lado.BANCO))
+            archivos_empresa = list(obj.archivos_de(Lado.EMPRESA))
+            banco = services.analizar(archivos_banco, obj.banco_desde, obj.banco_hasta)
+            empresa = services.analizar(archivos_empresa, obj.empresa_desde, obj.empresa_hasta)
+            ctx.update(archivos_banco=archivos_banco, archivos_empresa=archivos_empresa,
+                       banco=banco, empresa=empresa, reporte=services.reporte(banco, empresa))
         return ctx
 
     def get_success_url(self):
@@ -47,3 +54,15 @@ class Detalle(MisConciliaciones, VistaPreviaMixin, UpdateView):
     def form_valid(self, form):
         messages.success(self.request, "Vista previa actualizada.")
         return super().form_valid(form)
+
+
+class EliminarArchivo(LoginRequiredMixin, View):
+    def post(self, request, pk):
+        archivo = get_object_or_404(ArchivoConciliacion, pk=pk, conciliacion__usuario=request.user)
+        conciliacion_pk = archivo.conciliacion_id
+        if archivo.principal:
+            messages.error(request, "El archivo principal no se elimina; sube otro para reemplazarlo.")
+        else:
+            archivo.delete()
+            messages.success(request, "Archivo complementario eliminado.")
+        return redirect("conciliacion", pk=conciliacion_pk)

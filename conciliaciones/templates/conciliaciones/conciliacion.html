@@ -4,6 +4,11 @@
 <style>
   .layout{display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start}
   .side{position:sticky;top:16px}
+  .side .card{margin-bottom:14px}
+  .archivo{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid #f1f2f5}
+  .archivo span{word-break:break-all}
+  .tag{font-size:11px;background:#cfe0f7;color:#1f3a5f;border-radius:4px;padding:1px 6px;margin-left:4px}
+  .x{background:none;border:0;color:#b42318;cursor:pointer;font-size:16px;line-height:1}
   .side h3{margin:0 0 4px}
   .side fieldset{border:0;border-bottom:1px solid #e5e7eb;padding:0 0 14px;margin:0 0 14px}
   .dates{display:grid;grid-template-columns:1fr 1fr;gap:8px}
@@ -32,7 +37,9 @@
 
 <div class="layout">
   <!-- Barra lateral: archivos y rangos -->
-  <aside class="card side">
+    <!-- Barra lateral: archivos y rangos -->
+  <div class="side">
+  <aside class="card">
     <form method="post" enctype="multipart/form-data">
       {% csrf_token %}
       {{ form.non_field_errors }}
@@ -42,9 +49,10 @@
           <div><label for="{{ form.banco_desde.id_for_label }}">Desde</label>{{ form.banco_desde }}{{ form.banco_desde.errors }}</div>
           <div><label for="{{ form.banco_hasta.id_for_label }}">Hasta</label>{{ form.banco_hasta }}{{ form.banco_hasta.errors }}</div>
         </div>
-        <label for="{{ form.banco_archivo.id_for_label }}">Archivo (.csv)</label>
-        {{ form.banco_archivo }}{{ form.banco_archivo.errors }}
-        {% if object %}<div class="actual">Actual: {{ object.nombre_banco }}</div>{% endif %}
+        <label for="{{ form.banco_principal.id_for_label }}">{{ form.banco_principal.label }} (.csv){% if object %} – reemplaza al actual{% endif %}</label>
+        {{ form.banco_principal }}{{ form.banco_principal.errors }}
+        <label for="{{ form.banco_complementarios.id_for_label }}">{{ form.banco_complementarios.label }}</label>
+        {{ form.banco_complementarios }}{{ form.banco_complementarios.errors }}
       </fieldset>
       <fieldset>
         <h3>Empresa</h3>
@@ -52,13 +60,23 @@
           <div><label for="{{ form.empresa_desde.id_for_label }}">Desde</label>{{ form.empresa_desde }}{{ form.empresa_desde.errors }}</div>
           <div><label for="{{ form.empresa_hasta.id_for_label }}">Hasta</label>{{ form.empresa_hasta }}{{ form.empresa_hasta.errors }}</div>
         </div>
-        <label for="{{ form.empresa_archivo.id_for_label }}">Archivo (.csv)</label>
-        {{ form.empresa_archivo }}{{ form.empresa_archivo.errors }}
-        {% if object %}<div class="actual">Actual: {{ object.nombre_empresa }}</div>{% endif %}
+        <label for="{{ form.empresa_principal.id_for_label }}">{{ form.empresa_principal.label }} (.csv){% if object %} – reemplaza al actual{% endif %}</label>
+        {{ form.empresa_principal }}{{ form.empresa_principal.errors }}
+        <label for="{{ form.empresa_complementarios.id_for_label }}">{{ form.empresa_complementarios.label }}</label>
+        {{ form.empresa_complementarios }}{{ form.empresa_complementarios.errors }}
       </fieldset>
       <button class="btn" style="width:100%">{% if object %}Actualizar vista previa{% else %}Cargar y previsualizar{% endif %}</button>
     </form>
   </aside>
+
+  {% if object %}
+  <aside class="card">
+    <h3 style="margin-top:0">Archivos cargados</h3>
+    {% include "conciliaciones/_archivos.html" with titulo="Banco" archivos=archivos_banco %}
+    {% include "conciliaciones/_archivos.html" with titulo="Empresa" archivos=archivos_empresa %}
+  </aside>
+  {% endif %}
+  </div>
 
   <!-- Derecha: vista previa + reporte -->
   <div>
