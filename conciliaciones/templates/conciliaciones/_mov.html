@@ -1,0 +1,3 @@
+<span class="desc">{{ m.descripcion|default:"(sin descripción)"|truncatechars:38 }}</span>
+{% if m.referencia %}<small class="ref">{{ m.referencia }}</small>{% endif %}
+<span class="chip mini{% if not m.principal %} comp{% endif %}" title="{{ m.archivo }} · fila {{ m.fila }}{% if not m.principal %} (complementario){% endif %}">{% if not m.principal %}+ {% endif %}{{ m.archivo|truncatechars:16 }}</span>

@@ -1,8 +1,8 @@
-<div style="margin-bottom:10px">
-  <strong style="font-size:13px">{{ titulo }}</strong>
+<div class="lado-{{ clase }}" style="margin-bottom:12px">
+  <span class="badge">{{ titulo }}</span>
   {% for a in archivos %}
     <div class="archivo">
-      <span>{{ a.nombre }}{% if a.principal %}<span class="tag">principal</span>{% endif %}</span>
+      <span>{{ a.nombre }}{% if a.principal %}<span class="tag">principal</span>{% else %}<span class="tag comp">complementario</span>{% endif %}</span>
       {% if not a.principal %}
       <form method="post" action="{% url 'eliminar_archivo' a.pk %}" style="margin:0">
         {% csrf_token %}<button class="x" title="Eliminar archivo">&times;</button>
@@ -10,6 +10,6 @@
       {% endif %}
     </div>
   {% empty %}
-    <div class="muted" style="font-size:13px">Sin archivos</div>
+    <div class="muted" style="font-size:13px;margin-top:6px">Sin archivos</div>
   {% endfor %}
 </div>

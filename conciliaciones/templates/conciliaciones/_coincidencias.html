@@ -1,0 +1,60 @@
+<div class="card">
+  <div class="coinc-head">
+    <h3 style="margin:0">Coincidencias</h3>
+    <form method="get" class="tol">
+      <label for="tol">Tolerancia de fecha</label>
+      <input type="number" id="tol" name="tol" min="0" max="30" value="{{ tolerancia }}">
+      <span>día(s)</span>
+      <button class="btn sm">Aplicar</button>
+    </form>
+  </div>
+  {% with r=coincidencias.resumen %}
+  {% if coincidencias.total_filas %}
+  <div class="fpills">
+    <button type="button" class="fpill on" data-filtro="todos">Todos <b>{{ coincidencias.total_filas }}</b></button>
+    <button type="button" class="fpill" data-filtro="conciliado">Conciliados <b>{{ r.conciliados }}</b></button>
+    <button type="button" class="fpill" data-filtro="sugerido">Por revisar <b>{{ r.sugeridos }}</b></button>
+    <button type="button" class="fpill" data-filtro="pend_banco">Solo banco <b>{{ r.pend_banco }}</b></button>
+    <button type="button" class="fpill" data-filtro="pend_empresa">Solo empresa <b>{{ r.pend_empresa }}</b></button>
+  </div>
+  <div class="scroll tall">
+    <table class="grid coinc" id="tabla-coinc">
+      <thead><tr>
+        <th>Estado y regla</th>
+        <th class="h-banco">Banco · Fecha</th><th class="h-banco">Banco · Movimiento</th><th class="h-banco">Banco · Monto</th>
+        <th class="h-empresa">Empresa · Fecha</th><th class="h-empresa">Empresa · Movimiento</th><th class="h-empresa">Empresa · Monto</th>
+      </tr></thead>
+      <tbody>
+      {% for f in coincidencias.filas %}
+        <tr data-estado="{{ f.estado }}" class="fila-{{ f.estado }}">
+          <td class="marca">
+            <span class="st st-{{ f.estado }}">{{ f.etiqueta }}</span>{% if f.confianza %} <b class="conf">{{ f.confianza }}%</b>{% endif %}
+            {% if f.regla %}<span class="regla-txt">{{ f.regla }}{% if f.dias %} · {{ f.dias }} día(s) de diferencia{% endif %}</span>{% endif %}
+          </td>
+          {% if f.banco %}
+            <td class="b">{{ f.banco.fecha|date:"d/m/Y" }}</td>
+            <td class="b">{% include "conciliaciones/_mov.html" with m=f.banco %}</td>
+            <td class="b num {% if f.banco.monto < 0 %}neg{% else %}pos{% endif %}">{{ f.banco.monto|floatformat:2 }}</td>
+          {% else %}
+            <td class="b vacio" colspan="3">sin movimiento en el banco</td>
+          {% endif %}
+          {% if f.empresas %}
+            <td class="e">{% for m in f.empresas %}<div>{{ m.fecha|date:"d/m/Y" }}</div>{% endfor %}</td>
+            <td class="e">{% for m in f.empresas %}<div>{% include "conciliaciones/_mov.html" %}</div>{% endfor %}</td>
+            <td class="e num">{% for m in f.empresas %}<div class="{% if m.monto < 0 %}neg{% else %}pos{% endif %}">{{ m.monto|floatformat:2 }}</div>{% endfor %}</td>
+          {% else %}
+            <td class="e vacio" colspan="3">sin movimiento en la empresa</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if coincidencias.total_filas > coincidencias.filas|length %}
+    <p class="muted" style="margin:8px 0 0">Mostrando {{ coincidencias.filas|length }} de {{ coincidencias.total_filas }} filas.</p>
+  {% endif %}
+  {% else %}
+    <div class="vacio-bloque">No hay movimientos interpretables para comparar. Revisa los avisos del reporte.</div>
+  {% endif %}
+  {% endwith %}
+</div>

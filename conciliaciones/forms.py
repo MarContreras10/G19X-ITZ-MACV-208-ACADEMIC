@@ -40,7 +40,7 @@ class ConciliacionForm(forms.ModelForm):
     class Meta:
         model = Conciliacion
         fields = ["banco_desde", "banco_hasta", "empresa_desde", "empresa_hasta"]
-        widgets = {c: forms.DateInput(attrs={"type": "date"}) for c in fields}
+        widgets = {c: forms.DateInput(attrs={"type": "date"}, format="%Y-%m-%d") for c in fields}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

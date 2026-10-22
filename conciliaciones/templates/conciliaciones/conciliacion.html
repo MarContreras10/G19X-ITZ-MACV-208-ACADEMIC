@@ -2,121 +2,262 @@
 {% block mainclass %}wide{% endblock %}
 {% block content %}
 <style>
-  .layout{display:grid;grid-template-columns:320px 1fr;gap:20px;align-items:start}
-  .side{position:sticky;top:16px}
+  :root{--banco:#1d4ed8;--banco-bg:#e8f0ff;--empresa:#0f766e;--empresa-bg:#e0f5f1}
+  .lado-banco{--c:var(--banco);--bg:var(--banco-bg)}
+  .lado-empresa{--c:var(--empresa);--bg:var(--empresa-bg)}
+  td.b{--c:var(--banco);--bg:var(--banco-bg)}
+  td.e{--c:var(--empresa);--bg:var(--empresa-bg)}
+
+  .layout{display:grid;grid-template-columns:340px minmax(0,1fr);gap:20px;align-items:start}
+  .side{position:sticky;top:16px;max-height:calc(100vh - 32px);overflow:auto}
   .side .card{margin-bottom:14px}
-  .archivo{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:4px 0;border-bottom:1px solid #f1f2f5}
-  .archivo span{word-break:break-all}
-  .tag{font-size:11px;background:#cfe0f7;color:#1f3a5f;border-radius:4px;padding:1px 6px;margin-left:4px}
-  .x{background:none;border:0;color:#b42318;cursor:pointer;font-size:16px;line-height:1}
-  .side h3{margin:0 0 4px}
-  .side fieldset{border:0;border-bottom:1px solid #e5e7eb;padding:0 0 14px;margin:0 0 14px}
+  .side fieldset{border:0;border-bottom:1px solid #e5e7eb;padding:0 0 16px;margin:0 0 16px}
+  .side fieldset:last-of-type{border-bottom:0;margin-bottom:8px}
+  .side h3{display:flex;align-items:center;gap:8px;margin:0 0 6px}
   .dates{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-  .actual{font-size:12px;color:#6b7280;margin-top:4px;word-break:break-all}
+
+  .badge{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#fff;background:var(--c);border-radius:999px;padding:2px 10px}
+  .chip{display:inline-block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle;font-size:11px;font-weight:600;color:#fff;background:var(--c,#6b7280);border:1px solid var(--c,#6b7280);border-radius:5px;padding:1px 7px}
+  .chip.comp{color:var(--c,#6b7280);background:var(--bg,#f3f4f6);border-style:dashed}
+  .chip.mini{max-width:100px;font-size:10px;padding:0 5px;margin-left:4px}
+  .tag{font-size:11px;background:var(--c);color:#fff;border-radius:4px;padding:1px 6px;margin-left:6px}
+  .tag.comp{background:var(--bg);color:var(--c);border:1px dashed var(--c)}
+
+  /* Selectores de archivo */
+  .dz{margin-top:12px}
+  .dz-titulo{font-size:13px;color:#374151;font-weight:600;margin-bottom:4px}
+  .dz-drop{position:relative}
+  .dz-box{display:flex;flex-direction:column;align-items:center;gap:2px;text-align:center;color:var(--c);background:var(--bg);border:2px dashed var(--c);border-radius:10px;padding:14px 10px;transition:background .15s,box-shadow .15s}
+  .dz-box strong{font-size:13px}
+  .dz-box small{color:#6b7280;font-size:12px}
+  .dz-drop:hover .dz-box,.dz.over .dz-box{background:#fff;box-shadow:0 0 0 4px var(--bg)}
+  .dz input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;padding:0;border:0}
+  .dz-list{list-style:none;margin:6px 0 0;padding:0}
+  .dz-list li{display:flex;align-items:center;gap:8px;font-size:13px;padding:5px 8px;border:1px solid #e5e7eb;border-left:4px solid var(--c);border-radius:6px;margin-bottom:4px;background:#fff}
+  .dz-list .dz-name{flex:1;word-break:break-all}
+  .dz-list .dz-size{color:#6b7280;font-size:12px;white-space:nowrap}
+  .dz-list li.err{border-left-color:#b42318;color:#b42318}
+  .dz-x,.x{background:none;border:0;color:#b42318;cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+
+  .archivo{display:flex;justify-content:space-between;align-items:center;gap:8px;font-size:13px;padding:5px 0 5px 8px;margin-top:4px;border-left:4px solid var(--c);border-bottom:1px solid #f1f2f5}
+  .archivo span{word-break:break-all}
+
+  /* Tablas */
   .previews{display:grid;grid-template-columns:1fr 1fr;gap:14px}
   .panel{border:1px solid #d1d5db;border-radius:8px;overflow:hidden;background:#fff;min-width:0}
-  .panel-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:#eef1f6;border-bottom:1px solid #d1d5db}
-  /* equivalente a un JScrollPane: altura fija con barras de desplazamiento */
+  .panel-head{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:var(--bg);border-bottom:2px solid var(--c)}
   .scroll{height:340px;overflow:auto}
+  .scroll.tall{height:420px}
   table.grid{border-collapse:separate;border-spacing:0;font-size:13px;white-space:nowrap;width:max-content;min-width:100%}
-  table.grid th,table.grid td{padding:6px 10px;border-bottom:1px solid #eef0f3;border-right:1px solid #f1f2f5}
+  table.grid th,table.grid td{padding:6px 10px;border-bottom:1px solid #eef0f3;border-right:1px solid #f1f2f5;vertical-align:top}
   table.grid thead th{position:sticky;top:0;background:#e3e8f0;z-index:2}
   table.grid th.cmp{background:#cfe0f7}
   table.grid td.cmp{background:#f4f8fe}
   table.grid .n{color:#9ca3af;text-align:right;width:1%}
+  table.grid td.marca{border-left:4px solid var(--c,#9ca3af)}
+  .panel table.grid td.marca{border-left-color:var(--c)}
+  th.h-banco{background:var(--banco)!important;color:#fff}
+  th.h-empresa{background:var(--empresa)!important;color:#fff}
+  .coinc td.b,.coinc td.e{background:var(--bg)}
+  .coinc td.num{text-align:right;font-variant-numeric:tabular-nums}
+  .coinc td.vacio{color:#9ca3af;font-style:italic;background:#fafafa!important}
+  .coinc .desc{font-weight:500;display:inline-block;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+  .coinc .ref{color:#6b7280;margin-left:6px}
+  .coinc td.marca{white-space:normal;min-width:150px;max-width:210px}
+  .coinc .conf{font-size:12px;color:#166534}
+  .regla-txt{display:block;color:#6b7280;font-size:11px;line-height:1.3;margin-top:3px}
+  .coinc tr[hidden]{display:none}
+  .pos{color:#15803d}.neg{color:#b42318}
+  .st{display:inline-block;font-size:11px;font-weight:700;border-radius:5px;padding:2px 8px;border:1px solid}
+  .st-conciliado{color:#166534;background:#dcfce7;border-color:#86efac}
+  .st-sugerido{color:#92400e;background:#fef3c7;border-color:#fcd34d}
+  .st-pend_banco{color:var(--banco);background:#fff;border-color:var(--banco)}
+  .st-pend_empresa{color:var(--empresa);background:#fff;border-color:var(--empresa)}
+  tr.fila-conciliado td.marca{--c:#16a34a} tr.fila-sugerido td.marca{--c:#d97706}
+  tr.fila-pend_banco td.marca{--c:var(--banco)} tr.fila-pend_empresa td.marca{--c:var(--empresa)}
+  .coinc-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+  .tol{display:flex;align-items:center;gap:6px;font-size:13px}
+  .tol label{margin:0;display:inline}
+  .tol input{width:64px;padding:5px 6px;border:1px solid #d1d5db;border-radius:6px}
+  .btn.sm{padding:5px 12px;font-size:13px}
+  .fpills{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+  .fpill{background:#fff;color:#374151;border:1px solid #d1d5db;border-radius:999px;padding:4px 12px;font-size:13px;cursor:pointer}
+  .fpill b{margin-left:4px;color:#6b7280}
+  .fpill.on{background:#1f3a5f;color:#fff;border-color:#1f3a5f}.fpill.on b{color:#cbd5e1}
+  .vacio-bloque,.vacio{padding:50px 20px;text-align:center;color:#6b7280}
+
+  /* Reporte */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:16px}
+  .kpi{border:1px solid #e5e7eb;border-left:4px solid var(--k);border-radius:8px;padding:10px 12px;background:#fff}
+  .kpi .t{font-size:11px;color:#6b7280;text-transform:uppercase;letter-spacing:.05em}
+  .kpi .n{font-size:28px;font-weight:700;line-height:1.15;color:#111827}
+  .kpi .s{font-size:12px;color:#6b7280}
   .stats td:first-child{color:#4b5563}
   .stats td.v{text-align:right;font-variant-numeric:tabular-nums}
   .dif{font-size:18px;font-weight:600}
-  .vacio{padding:60px 20px;text-align:center;color:#6b7280}
-  ul.avisos{margin:8px 0 0;padding-left:20px;font-size:14px;color:#92400e}
-  @media(max-width:1100px){.layout{grid-template-columns:1fr}.side{position:static}.previews{grid-template-columns:1fr}}
+  details.alertas{border:1px solid #d1d5db;border-radius:8px;background:#fff;margin-top:6px}
+  details.alertas>summary{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;padding:10px 14px;cursor:pointer;list-style:none;font-weight:600;color:#1f3a5f}
+  details.alertas>summary::-webkit-details-marker{display:none}
+  details.alertas>summary::before{content:"▸";margin-right:6px;display:inline-block}
+  details.alertas[open]>summary::before{content:"▾"}
+  ul.al-lista details>summary::after{content:"▸";margin-left:auto;color:#9ca3af}
+  ul.al-lista details[open]>summary::after{content:"▾"}
+  .al-titulo{flex:1}
+  .cnt{font-size:12px;font-weight:600;border-radius:999px;padding:2px 10px;margin-left:4px}
+  .nivel-error .ico,.cnt.nivel-error{--n:#b42318;--nb:#fde8e8}
+  .nivel-advertencia .ico,.cnt.nivel-advertencia{--n:#b45309;--nb:#fef3c7}
+  .nivel-sugerencia .ico,.cnt.nivel-sugerencia{--n:#1d4ed8;--nb:#e0eaff}
+  .nivel-info .ico,.cnt.nivel-info{--n:#4b5563;--nb:#eef0f3}
+  .cnt{color:var(--n);background:var(--nb)}
+  ul.al-lista{list-style:none;margin:0;padding:0;max-height:340px;overflow:auto;border-top:1px solid #e5e7eb}
+  ul.al-lista>li{border-bottom:1px solid #f1f2f5;padding:8px 14px}
+  ul.al-lista>li:last-child{border-bottom:0}
+  ul.al-lista summary,.fila-al{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;font-size:14px}
+  .fila-al{cursor:default}
+  ul.al-lista summary::-webkit-details-marker{display:none}
+  ul.al-lista p{margin:6px 0 2px 30px;font-size:13px;color:#4b5563;line-height:1.45}
+  .ico{flex:none;width:20px;height:20px;border-radius:50%;background:var(--nb);color:var(--n);display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:700}
+  .nivel-error .ico::before{content:"✕"}.nivel-advertencia .ico::before{content:"!"}
+  .nivel-sugerencia .ico::before{content:"→"}.nivel-info .ico::before{content:"i"}
+  .origen{font-size:11px;font-weight:700;border-radius:4px;padding:1px 6px;color:#fff}
+  .origen-banco{background:var(--banco)}.origen-empresa{background:var(--empresa)}
+
+  @media(max-width:1100px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.previews{grid-template-columns:1fr}}
+  @media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}}
 </style>
 
 <p style="margin-top:0"><a href="{% url 'home' %}">&larr; Volver al inicio</a></p>
 <h2 style="margin-top:0">{% if object %}Conciliación #{{ object.pk }}{% else %}Nueva conciliación{% endif %}</h2>
 
 <div class="layout">
-  <!-- Barra lateral: archivos y rangos -->
-    <!-- Barra lateral: archivos y rangos -->
+  <!-- Barra lateral: rangos y archivos -->
   <div class="side">
-  <aside class="card">
-    <form method="post" enctype="multipart/form-data">
-      {% csrf_token %}
-      {{ form.non_field_errors }}
-      <fieldset>
-        <h3>Banco</h3>
-        <div class="dates">
-          <div><label for="{{ form.banco_desde.id_for_label }}">Desde</label>{{ form.banco_desde }}{{ form.banco_desde.errors }}</div>
-          <div><label for="{{ form.banco_hasta.id_for_label }}">Hasta</label>{{ form.banco_hasta }}{{ form.banco_hasta.errors }}</div>
-        </div>
-        <label for="{{ form.banco_principal.id_for_label }}">{{ form.banco_principal.label }} (.csv){% if object %} – reemplaza al actual{% endif %}</label>
-        {{ form.banco_principal }}{{ form.banco_principal.errors }}
-        <label for="{{ form.banco_complementarios.id_for_label }}">{{ form.banco_complementarios.label }}</label>
-        {{ form.banco_complementarios }}{{ form.banco_complementarios.errors }}
-      </fieldset>
-      <fieldset>
-        <h3>Empresa</h3>
-        <div class="dates">
-          <div><label for="{{ form.empresa_desde.id_for_label }}">Desde</label>{{ form.empresa_desde }}{{ form.empresa_desde.errors }}</div>
-          <div><label for="{{ form.empresa_hasta.id_for_label }}">Hasta</label>{{ form.empresa_hasta }}{{ form.empresa_hasta.errors }}</div>
-        </div>
-        <label for="{{ form.empresa_principal.id_for_label }}">{{ form.empresa_principal.label }} (.csv){% if object %} – reemplaza al actual{% endif %}</label>
-        {{ form.empresa_principal }}{{ form.empresa_principal.errors }}
-        <label for="{{ form.empresa_complementarios.id_for_label }}">{{ form.empresa_complementarios.label }}</label>
-        {{ form.empresa_complementarios }}{{ form.empresa_complementarios.errors }}
-      </fieldset>
-      <button class="btn" style="width:100%">{% if object %}Actualizar vista previa{% else %}Cargar y previsualizar{% endif %}</button>
-    </form>
-  </aside>
+    <aside class="card">
+      <form method="post" enctype="multipart/form-data">
+        {% csrf_token %}
+        {{ form.non_field_errors }}
+        <fieldset class="lado-banco">
+          <h3><span class="badge">Banco</span> Extracto</h3>
+          <div class="dates">
+            <div><label for="{{ form.banco_desde.id_for_label }}">Desde</label>{{ form.banco_desde }}{{ form.banco_desde.errors }}</div>
+            <div><label for="{{ form.banco_hasta.id_for_label }}">Hasta</label>{{ form.banco_hasta }}{{ form.banco_hasta.errors }}</div>
+          </div>
+          {% include "conciliaciones/_dropzone.html" with campo=form.banco_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" %}
+          {% include "conciliaciones/_dropzone.html" with campo=form.banco_complementarios titulo="Complementarios (opcional)" ayuda="Arrastra uno o varios archivos" %}
+        </fieldset>
+        <fieldset class="lado-empresa">
+          <h3><span class="badge">Empresa</span> Contabilidad</h3>
+          <div class="dates">
+            <div><label for="{{ form.empresa_desde.id_for_label }}">Desde</label>{{ form.empresa_desde }}{{ form.empresa_desde.errors }}</div>
+            <div><label for="{{ form.empresa_hasta.id_for_label }}">Hasta</label>{{ form.empresa_hasta }}{{ form.empresa_hasta.errors }}</div>
+          </div>
+          {% include "conciliaciones/_dropzone.html" with campo=form.empresa_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" %}
+          {% include "conciliaciones/_dropzone.html" with campo=form.empresa_complementarios titulo="Complementarios (opcional)" ayuda="Arrastra uno o varios archivos" %}
+        </fieldset>
+        {% if object %}<p class="muted" style="font-size:12px;margin:0 0 8px">Subir otro archivo principal reemplaza al actual.</p>{% endif %}
+        <button class="btn" style="width:100%">{% if object %}Actualizar análisis{% else %}Cargar y analizar{% endif %}</button>
+      </form>
+    </aside>
 
-  {% if object %}
-  <aside class="card">
-    <h3 style="margin-top:0">Archivos cargados</h3>
-    {% include "conciliaciones/_archivos.html" with titulo="Banco" archivos=archivos_banco %}
-    {% include "conciliaciones/_archivos.html" with titulo="Empresa" archivos=archivos_empresa %}
-  </aside>
-  {% endif %}
+    {% if object %}
+    <aside class="card">
+      <h3 style="margin:0 0 10px;display:block">Archivos cargados</h3>
+      {% include "conciliaciones/_archivos.html" with titulo="Banco" clase="banco" archivos=archivos_banco %}
+      {% include "conciliaciones/_archivos.html" with titulo="Empresa" clase="empresa" archivos=archivos_empresa %}
+    </aside>
+    {% endif %}
   </div>
 
-  <!-- Derecha: vista previa + reporte -->
-  <div>
+  <!-- Derecha: vista previa, coincidencias y reporte -->
+  <div style="min-width:0">
     <div class="card">
-      <h3>Vista previa</h3>
+      <h3>Vista previa de los archivos</h3>
       {% if object %}
-        <p class="muted" style="margin-top:0">Las columnas resaltadas son los campos que se comparan (fecha y monto).</p>
+        <p class="muted" style="margin-top:0">Azul = banco · verde = empresa. Las columnas resaltadas son las que se comparan. Los archivos complementarios aparecen con borde punteado y un <b>+</b>.</p>
         <div class="previews">
-          {% include "conciliaciones/_panel.html" with titulo="Banco" lado=banco %}
-          {% include "conciliaciones/_panel.html" with titulo="Empresa" lado=empresa %}
+          {% include "conciliaciones/_panel.html" with titulo="Banco" clase="banco" lado=banco %}
+          {% include "conciliaciones/_panel.html" with titulo="Empresa" clase="empresa" lado=empresa %}
         </div>
       {% else %}
-        <div class="vacio">Selecciona los archivos y los rangos de fecha en la barra lateral para ver aquí la vista previa.</div>
+        <div class="vacio">Elige los rangos de fecha y los archivos de la barra lateral para ver aquí la vista previa.</div>
       {% endif %}
     </div>
+
+    {% if object %}{% include "conciliaciones/_coincidencias.html" %}{% endif %}
 
     <div class="card">
       <h3>Reporte</h3>
       {% if object %}
-        <table class="stats">
-          <thead><tr><th></th><th class="v" style="text-align:right">Banco</th><th style="text-align:right">Empresa</th></tr></thead>
-          <tbody>
-            <tr><td>Movimientos</td><td class="v">{{ reporte.banco.movimientos|default_if_none:"–" }}</td><td class="v">{{ reporte.empresa.movimientos|default_if_none:"–" }}</td></tr>
-            <tr><td>Ingresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.ingresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.ingresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
-            <tr><td>Egresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.egresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.egresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
-            <tr><td><strong>Neto</strong></td><td class="v"><strong>{% if reporte.banco %}{{ reporte.banco.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td><td class="v"><strong>{% if reporte.empresa %}{{ reporte.empresa.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td></tr>
-          </tbody>
-        </table>
-        <p class="dif">Diferencia (banco − empresa):
-          {% if reporte.diferencia is not None %}{{ reporte.diferencia|floatformat:2 }}{% else %}<span class="muted">no disponible</span>{% endif %}
-        </p>
-        {% if reporte.avisos %}
-          <strong style="font-size:14px">Avisos</strong>
-          <ul class="avisos">{% for a in reporte.avisos %}<li>{{ a }}</li>{% endfor %}</ul>
-        {% endif %}
-        <p class="muted" style="margin-bottom:0">El análisis detallado (coincidencias y partidas pendientes) se agregará aquí.</p>
+        {% include "conciliaciones/_reporte.html" %}
       {% else %}
         <p class="muted">El reporte aparecerá cuando cargues los archivos.</p>
       {% endif %}
     </div>
   </div>
 </div>
+
+<script>
+/* Selectores de archivo: arrastrar y soltar, lista con botón para quitar */
+document.querySelectorAll('.dz').forEach(function (dz) {
+  var input = dz.querySelector('input[type=file]');
+  var lista = dz.querySelector('.dz-list');
+  var multiple = input.multiple;
+  var archivos = [];
+
+  function tam(n) { return n < 1024 ? n + ' B' : n < 1048576 ? (n / 1024).toFixed(1) + ' KB' : (n / 1048576).toFixed(1) + ' MB'; }
+
+  function sincronizar() {
+    var dt = new DataTransfer();
+    archivos.forEach(function (f) { dt.items.add(f); });
+    input.files = dt.files;
+    lista.innerHTML = '';
+    archivos.forEach(function (f, i) {
+      var li = document.createElement('li');
+      var n = document.createElement('span'); n.className = 'dz-name'; n.textContent = f.name;
+      var s = document.createElement('span'); s.className = 'dz-size'; s.textContent = tam(f.size);
+      var x = document.createElement('button'); x.type = 'button'; x.className = 'dz-x'; x.title = 'Quitar'; x.innerHTML = '&times;';
+      x.onclick = function () { archivos.splice(i, 1); sincronizar(); };
+      li.append(n, s, x); lista.appendChild(li);
+    });
+  }
+
+  function agregar(nuevos) {
+    nuevos = Array.from(nuevos);
+    var validos = nuevos.filter(function (f) { return /\.csv$/i.test(f.name); });
+    var rechazados = nuevos.length - validos.length;
+    if (!multiple) { archivos = validos.slice(0, 1); }
+    else {
+      validos.forEach(function (f) {
+        if (!archivos.some(function (g) { return g.name === f.name && g.size === f.size; })) archivos.push(f);
+      });
+    }
+    sincronizar();
+    if (rechazados) {
+      var li = document.createElement('li'); li.className = 'err';
+      li.textContent = rechazados + ' archivo(s) ignorado(s): solo se aceptan .csv';
+      lista.appendChild(li);
+    }
+  }
+
+  input.addEventListener('change', function () { agregar(input.files); });
+  ['dragenter', 'dragover'].forEach(function (ev) {
+    dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.add('over'); });
+  });
+  ['dragleave', 'drop'].forEach(function (ev) {
+    dz.addEventListener(ev, function (e) { e.preventDefault(); dz.classList.remove('over'); });
+  });
+  dz.addEventListener('drop', function (e) { agregar(e.dataTransfer.files); });
+});
+
+/* Filtros de la tabla de coincidencias */
+document.querySelectorAll('[data-filtro]').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    var f = btn.dataset.filtro;
+    document.querySelectorAll('[data-filtro]').forEach(function (b) { b.classList.toggle('on', b === btn); });
+    document.querySelectorAll('#tabla-coinc tbody tr').forEach(function (tr) {
+      tr.hidden = !(f === 'todos' || tr.dataset.estado === f);
+    });
+  });
+});
+</script>
 {% endblock %}

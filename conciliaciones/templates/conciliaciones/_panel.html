@@ -1,6 +1,6 @@
-<section class="panel">
+<section class="panel lado-{{ clase }}">
   <div class="panel-head">
-    <strong>{{ titulo }}</strong>
+    <span><span class="badge">{{ titulo }}</span></span>
     {% if lado.columnas %}<span class="muted">{{ lado.mostradas }}{% if lado.total > lado.mostradas %} de {{ lado.total }}{% endif %} fila(s) en el rango</span>{% endif %}
   </div>
   {% if lado.error %}
@@ -10,16 +10,18 @@
     <table class="grid">
       <thead><tr>
         <th class="n">#</th>
-        {% for c in lado.columnas %}<th{% if forloop.counter0 in lado.comparados %} class="cmp" title="Campo comparado"{% endif %}>{{ c }}</th>{% endfor %}
+        <th>Archivo</th>
+        {% for c in lado.columnas %}<th{% if forloop.counter0 in lado.comparados %} class="cmp" title="Campo usado para comparar"{% endif %}>{{ c }}</th>{% endfor %}
       </tr></thead>
       <tbody>
       {% for fila in lado.filas %}
         <tr>
-          <td class="n">{{ forloop.counter }}</td>
-          {% for v in fila %}<td{% if forloop.counter0 in lado.comparados %} class="cmp"{% endif %}>{{ v }}</td>{% endfor %}
+          <td class="n marca">{{ forloop.counter }}</td>
+          <td><span class="chip{% if not fila.principal %} comp{% endif %}" title="{% if fila.principal %}Archivo principal{% else %}Archivo complementario{% endif %}">{% if not fila.principal %}+ {% endif %}{{ fila.archivo }}</span></td>
+          {% for v in fila.celdas %}<td{% if forloop.counter0 in lado.comparados %} class="cmp"{% endif %}>{{ v }}</td>{% endfor %}
         </tr>
       {% empty %}
-        <tr><td colspan="{{ lado.columnas|length|add:1 }}" class="muted">No hay filas dentro del rango de fechas.</td></tr>
+        <tr><td colspan="{{ lado.columnas|length|add:2 }}" class="muted">No hay filas dentro del rango de fechas.</td></tr>
       {% endfor %}
       </tbody>
     </table>

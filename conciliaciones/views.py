@@ -33,11 +33,22 @@ class VistaPreviaMixin:
         if obj and obj.pk:
             archivos_banco = list(obj.archivos_de(Lado.BANCO))
             archivos_empresa = list(obj.archivos_de(Lado.EMPRESA))
-            banco = services.analizar(archivos_banco, obj.banco_desde, obj.banco_hasta)
-            empresa = services.analizar(archivos_empresa, obj.empresa_desde, obj.empresa_hasta)
+            banco = services.analizar(archivos_banco, obj.banco_desde, obj.banco_hasta, Lado.BANCO.value)
+            empresa = services.analizar(archivos_empresa, obj.empresa_desde, obj.empresa_hasta, Lado.EMPRESA.value)
+            tolerancia = self._tolerancia()
+            coincidencias = services.emparejar(banco["movimientos"], empresa["movimientos"], tolerancia)
             ctx.update(archivos_banco=archivos_banco, archivos_empresa=archivos_empresa,
-                       banco=banco, empresa=empresa, reporte=services.reporte(banco, empresa))
+                       banco=banco, empresa=empresa, tolerancia=tolerancia, coincidencias=coincidencias,
+                       reporte=services.reporte(banco, empresa, coincidencias, obj))
         return ctx
+
+    def _tolerancia(self):
+        """Tolerancia de fecha en días, tomada de ?tol=N (entre 0 y 30)."""
+        try:
+            valor = int(self.request.GET.get("tol", services.TOLERANCIA_DIAS))
+        except ValueError:
+            valor = services.TOLERANCIA_DIAS
+        return max(0, min(30, valor))
 
     def get_success_url(self):
         return reverse_lazy("conciliacion", args=[self.object.pk])

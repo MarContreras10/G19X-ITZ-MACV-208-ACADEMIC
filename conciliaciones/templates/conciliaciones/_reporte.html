@@ -1,0 +1,62 @@
+{% with r=reporte.resumen %}
+<div class="kpis">
+  <div class="kpi" style="--k:#15803d">
+    <div class="t">Conciliados</div><div class="n">{{ r.conciliados }}</div>
+    <div class="s">{% if r.total_banco and r.total_empresa %}{{ r.cobertura_banco }}% del banco · {{ r.cobertura_empresa }}% de la empresa{% else %}Sin datos para comparar{% endif %}</div>
+  </div>
+  <div class="kpi" style="--k:#b45309">
+    <div class="t">Por revisar</div><div class="n">{{ r.sugeridos }}</div>
+    <div class="s">Coincidencias ambiguas</div>
+  </div>
+  <div class="kpi" style="--k:var(--banco)">
+    <div class="t">Solo en el banco</div><div class="n">{{ r.pend_banco }}</div>
+    <div class="s">{{ r.monto_pend_banco|floatformat:2 }} en total</div>
+  </div>
+  <div class="kpi" style="--k:var(--empresa)">
+    <div class="t">Solo en la empresa</div><div class="n">{{ r.pend_empresa }}</div>
+    <div class="s">{{ r.monto_pend_empresa|floatformat:2 }} en total</div>
+  </div>
+</div>
+{% endwith %}
+
+<table class="stats">
+  <thead><tr><th></th>
+    <th style="text-align:right"><span class="badge" style="--c:var(--banco)">Banco</span></th>
+    <th style="text-align:right"><span class="badge" style="--c:var(--empresa)">Empresa</span></th></tr></thead>
+  <tbody>
+    <tr><td>Movimientos</td><td class="v">{{ reporte.banco.movimientos|default_if_none:"–" }}</td><td class="v">{{ reporte.empresa.movimientos|default_if_none:"–" }}</td></tr>
+    <tr><td>Ingresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.ingresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.ingresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
+    <tr><td>Egresos</td><td class="v">{% if reporte.banco %}{{ reporte.banco.egresos|floatformat:2 }}{% else %}–{% endif %}</td><td class="v">{% if reporte.empresa %}{{ reporte.empresa.egresos|floatformat:2 }}{% else %}–{% endif %}</td></tr>
+    <tr><td><strong>Neto</strong></td><td class="v"><strong>{% if reporte.banco %}{{ reporte.banco.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td><td class="v"><strong>{% if reporte.empresa %}{{ reporte.empresa.neto|floatformat:2 }}{% else %}–{% endif %}</strong></td></tr>
+  </tbody>
+</table>
+<p class="dif">Diferencia (banco − empresa):
+  {% if reporte.diferencia is not None %}{{ reporte.diferencia|floatformat:2 }}{% else %}<span class="muted">no disponible</span>{% endif %}
+</p>
+
+<details class="alertas"{% if reporte.conteo.error %} open{% endif %}>
+  <summary>
+    <span class="al-titulo">Avisos del análisis</span>
+    <span class="al-conteo">
+      {% if reporte.conteo.error %}<span class="cnt nivel-error">{{ reporte.conteo.error }} error{{ reporte.conteo.error|pluralize:"es" }}</span>{% endif %}
+      {% if reporte.conteo.advertencia %}<span class="cnt nivel-advertencia">{{ reporte.conteo.advertencia }} advertencia{{ reporte.conteo.advertencia|pluralize }}</span>{% endif %}
+      {% if reporte.conteo.sugerencia %}<span class="cnt nivel-sugerencia">{{ reporte.conteo.sugerencia }} sugerencia{{ reporte.conteo.sugerencia|pluralize }}</span>{% endif %}
+      {% if reporte.conteo.info %}<span class="cnt nivel-info">{{ reporte.conteo.info }} informativo{{ reporte.conteo.info|pluralize }}</span>{% endif %}
+      {% if not reporte.alertas %}<span class="cnt nivel-info">Sin avisos</span>{% endif %}
+    </span>
+  </summary>
+  <ul class="al-lista">
+    {% for a in reporte.alertas %}
+    <li class="nivel-{{ a.nivel }}">
+      {% if a.detalle %}
+      <details>
+        <summary><span class="ico"></span><strong>{{ a.titulo }}</strong>{% if a.origen %}<span class="origen origen-{{ a.origen|lower }}">{{ a.origen }}</span>{% endif %}</summary>
+        <p>{{ a.detalle }}</p>
+      </details>
+      {% else %}
+      <div class="fila-al"><span class="ico"></span><strong>{{ a.titulo }}</strong>{% if a.origen %}<span class="origen origen-{{ a.origen|lower }}">{{ a.origen }}</span>{% endif %}</div>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</details>
