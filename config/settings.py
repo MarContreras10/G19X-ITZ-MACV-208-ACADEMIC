@@ -10,22 +10,35 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
+from dotenv import load_dotenv
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Lee las variables del archivo .env (si existe). Las variables que ya estén
+# definidas en el sistema tienen prioridad sobre las del archivo.
+load_dotenv(BASE_DIR / ".env")
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-jk*z0x&d#s0zikfcb2wetpbi4rric%376mda0#96k6bju7(ln%'
+# Configuración sensible: se lee del entorno, nunca se escribe en el código.
+# Ver .env.example para la lista de variables.
+# https://docs.djangoproject.com/en/stable/howto/deployment/checklist/
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    raise ImproperlyConfigured(
+        "Falta la variable de entorno DJANGO_SECRET_KEY. Copia .env.example a .env y "
+        "completa el valor (el README explica cómo generar una clave)."
+    )
 
-ALLOWED_HOSTS = []
+# Por defecto es False: si alguien olvida configurarlo, el sistema falla del lado seguro.
+DEBUG = os.environ.get("DJANGO_DEBUG", "False").strip().lower() in ("1", "true", "yes", "on")
+
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "127.0.0.1,localhost").split(",") if h.strip()]
 
 
 # Application definition
@@ -132,3 +145,6 @@ LOGIN_REDIRECT_URL = 'home'
 LOGOUT_REDIRECT_URL = 'login'
 MEDIA_ROOT = BASE_DIR / 'media'
 MEDIA_URL = '/media/'
+
+# Tipo de clave primaria de los modelos (explícito para que sea igual en Django 5.2 y 6.x).
+DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

@@ -1,0 +1,109 @@
+{% load l10n %}
+<div class="card" id="manual">
+  <h3>Conciliación manual</h3>
+  <p class="muted" style="margin-top:0">
+    Marca los movimientos que se correspondan y pulsa <b>Conciliar</b>. Pueden ser varios de un lado contra uno o varios del otro
+    (por ejemplo, un depósito que agrupa varias facturas), siempre que <b>ambos totales coincidan</b>.
+    Aquí aparece todo lo que aún no está conciliado, incluidos los casos por revisar.
+  </p>
+  {% with p=coincidencias.pendientes %}
+  {% if p.banco or p.empresa %}
+  <form method="post" action="{% url 'conciliar_manual' object.pk %}" id="form-manual">
+    {% csrf_token %}
+    <input type="hidden" name="tol" value="{{ tolerancia }}"><input type="hidden" name="ancla" value="manual">
+    <div class="mpanes">
+      <section class="panel lado-banco">
+        <div class="panel-head">
+          <span class="badge">Banco</span>
+          <span class="muted">{{ p.banco|length }} pendiente(s)</span>
+          <input type="search" class="mbuscar" data-panel="banco" placeholder="Buscar…" aria-label="Buscar en el banco">
+        </div>
+        <div class="mlista" data-lista="banco">
+          {% for m in p.banco|slice:":1000" %}
+          <label class="mrow" data-monto="{{ m.monto|unlocalize }}" data-texto="{{ m.descripcion|lower }} {{ m.referencia|lower }} {{ m.monto|unlocalize }} {{ m.fecha|date:'d/m/Y' }}">
+            <input type="checkbox" name="banco" value="{{ m.clave }}">
+            <span class="mf">{{ m.fecha|date:"d/m/Y" }}</span>
+            <span class="md">{% include "conciliaciones/_mov.html" %}</span>
+            <span class="mm {% if m.monto < 0 %}neg{% else %}pos{% endif %}">{{ m.monto|floatformat:2 }}</span>
+            {% if m.sugerido %}<span class="st st-sugerido" title="Tiene candidatos posibles">Revisar</span>{% endif %}
+          </label>
+          {% empty %}<div class="vacio-bloque" style="padding:30px 10px">Nada pendiente en el banco.</div>{% endfor %}
+        </div>
+      </section>
+      <section class="panel lado-empresa">
+        <div class="panel-head">
+          <span class="badge">Empresa</span>
+          <span class="muted">{{ p.empresa|length }} pendiente(s)</span>
+          <input type="search" class="mbuscar" data-panel="empresa" placeholder="Buscar…" aria-label="Buscar en la empresa">
+        </div>
+        <div class="mlista" data-lista="empresa">
+          {% for m in p.empresa|slice:":1000" %}
+          <label class="mrow" data-monto="{{ m.monto|unlocalize }}" data-texto="{{ m.descripcion|lower }} {{ m.referencia|lower }} {{ m.monto|unlocalize }} {{ m.fecha|date:'d/m/Y' }}">
+            <input type="checkbox" name="empresa" value="{{ m.clave }}">
+            <span class="mf">{{ m.fecha|date:"d/m/Y" }}</span>
+            <span class="md">{% include "conciliaciones/_mov.html" %}</span>
+            <span class="mm {% if m.monto < 0 %}neg{% else %}pos{% endif %}">{{ m.monto|floatformat:2 }}</span>
+            {% if m.sugerido %}<span class="st st-sugerido" title="Es candidato de un movimiento del banco">Revisar</span>{% endif %}
+          </label>
+          {% empty %}<div class="vacio-bloque" style="padding:30px 10px">Nada pendiente en la empresa.</div>{% endfor %}
+        </div>
+      </section>
+    </div>
+    {% if p.banco|length > 1000 or p.empresa|length > 1000 %}<p class="muted" style="margin:6px 0 0">Se muestran los primeros 1000 movimientos de cada lado.</p>{% endif %}
+
+    <div class="mbar" id="mbar">
+      <div class="msum lado-banco"><span class="badge">Banco</span> <b id="n-b">0</b> sel. · <b id="s-b">0.00</b></div>
+      <div class="msum lado-empresa"><span class="badge">Empresa</span> <b id="n-e">0</b> sel. · <b id="s-e">0.00</b></div>
+      <div class="msum mdif">Diferencia: <b id="s-d">0.00</b></div>
+      <input type="text" name="nota" maxlength="255" placeholder="Nota (opcional)" class="mnota">
+      <button type="button" class="btn sec sm" id="btn-limpiar">Limpiar</button>
+      <button class="btn" id="btn-conciliar" disabled>Conciliar selección</button>
+    </div>
+    <p class="muted" id="mayuda" style="margin:6px 0 0;font-size:12px">Al marcar un movimiento se resaltan los del otro lado con el mismo monto.</p>
+  </form>
+  {% else %}
+    <div class="vacio-bloque" style="padding:30px 10px">No quedan movimientos pendientes por conciliar.</div>
+  {% endif %}
+  {% endwith %}
+
+  {% with r=coincidencias.resumen %}
+  {% if coincidencias.manuales or coincidencias.manuales_huerfanas %}
+  <h4 style="margin:22px 0 8px;color:#1f3a5f">Conciliaciones manuales realizadas ({{ r.manuales|add:r.manuales_huerfanas }})</h4>
+  <div class="scroll" style="height:auto;max-height:300px">
+    <table class="grid" style="white-space:normal">
+      <thead><tr><th>Cuándo / quién</th><th class="h-banco">Banco</th><th class="h-empresa">Empresa</th><th>Monto</th><th>Nota</th><th></th></tr></thead>
+      <tbody>
+      {% for g in coincidencias.manuales %}
+        <tr>
+          <td>{{ g.creado|date:"d/m/Y H:i" }}<br><small class="muted">{{ g.usuario|default:"—" }} · {{ g.tipo_label }}</small></td>
+          <td class="b">{% for m in g.bancos %}<div>{{ m.fecha|date:"d/m/Y" }} · {{ m.descripcion|default:"(sin descripción)"|truncatechars:30 }}</div>{% endfor %}</td>
+          <td class="e">{% for m in g.empresas %}<div>{{ m.fecha|date:"d/m/Y" }} · {{ m.descripcion|default:"(sin descripción)"|truncatechars:30 }}</div>{% endfor %}</td>
+          <td class="num">{{ g.monto|floatformat:2 }}</td>
+          <td>{{ g.nota }}</td>
+          <td>
+            <form method="post" action="{% url 'deshacer_manual' g.id %}" class="inline">
+              {% csrf_token %}<input type="hidden" name="tol" value="{{ tolerancia }}"><input type="hidden" name="ancla" value="manual">
+              <button class="link-btn">Deshacer</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      {% for g in coincidencias.manuales_huerfanas %}
+        <tr class="huerfana">
+          <td>{{ g.creado|date:"d/m/Y H:i" }}<br><small class="muted">{{ g.usuario|default:"—" }} · {{ g.tipo_label }}</small></td>
+          <td colspan="3"><span class="st st-sugerido">No aplicada</span> Alguno de sus movimientos ya no está disponible (p. ej. quedó fuera del rango de fechas).</td>
+          <td>{{ g.nota }}</td>
+          <td>
+            <form method="post" action="{% url 'deshacer_manual' g.id %}" class="inline">
+              {% csrf_token %}<input type="hidden" name="tol" value="{{ tolerancia }}"><input type="hidden" name="ancla" value="manual">
+              <button class="link-btn">Deshacer</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+  {% endwith %}
+</div>

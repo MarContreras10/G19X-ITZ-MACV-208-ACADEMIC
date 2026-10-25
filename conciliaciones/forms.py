@@ -1,7 +1,7 @@
 from django import forms
 from django.db import transaction
 
-from .models import ArchivoConciliacion, Conciliacion
+from .models import ArchivoConciliacion, Conciliacion, Emparejamiento
 
 Lado = ArchivoConciliacion.Lado
 
@@ -80,10 +80,12 @@ class ConciliacionForm(forms.ModelForm):
     @transaction.atomic
     def save(self, commit=True):
         obj = super().save(commit=commit)
+        self.manuales_eliminados = 0   # conciliaciones manuales que dependían de un archivo reemplazado
         for prefijo, lado in (("banco", Lado.BANCO), ("empresa", Lado.EMPRESA)):
             principal = self.cleaned_data.get(f"{prefijo}_principal")
             if principal:
                 for anterior in obj.archivos.filter(lado=lado, principal=True):
+                    self.manuales_eliminados += Emparejamiento.objects.filter(items__archivo=anterior).distinct().count()
                     anterior.delete()
                 ArchivoConciliacion.objects.create(conciliacion=obj, lado=lado, archivo=principal, principal=True)
             for f in self.cleaned_data.get(f"{prefijo}_complementarios", []):

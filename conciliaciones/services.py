@@ -169,7 +169,8 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
                "Una columna de referencia o folio mejora la precisión de las coincidencias.")
 
     # Registros: (archivo, es_principal, número_de_fila, fila) en las columnas del principal
-    registros = [(principal.nombre, True, n, f) for n, f in zip(nums_principal, filas_principal)]
+    registros = [(principal.nombre, True, n, f, getattr(principal, "pk", None))
+                 for n, f in zip(nums_principal, filas_principal)]
     claves = [_norm(c) for c in columnas]
     for comp in complementarios:
         try:
@@ -192,11 +193,12 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
             avisar("info", f"{comp.nombre}: columnas ignoradas",
                    f"El principal no tiene estas columnas, por eso no se usan: {', '.join(extras)}.")
         for n, f in zip(nums, filas):
-            registros.append((comp.nombre, False, n, [f[m] if m is not None else "" for m in mapa]))
+            registros.append((comp.nombre, False, n, [f[m] if m is not None else "" for m in mapa],
+                              getattr(comp, "pk", None)))
 
     # Filas repetidas entre archivos distintos del mismo lado
     vistos, repetidas = {}, defaultdict(int)
-    for nombre, _, _, fila in registros:
+    for nombre, _, _, fila, _ in registros:
         clave = tuple(_norm(c) for c in fila)
         if clave in vistos and vistos[clave] != nombre:
             repetidas[nombre] += 1
@@ -210,7 +212,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
     visibles, problemas = [], []
     ingresos = egresos = CERO
     movimientos = 0
-    for nombre, es_principal, numero, fila in registros:
+    for nombre, es_principal, numero, fila, archivo_pk in registros:
         fecha = None
         if i_fecha is not None:
             fecha = _fecha(fila[i_fecha])
@@ -238,6 +240,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
         if fecha is not None:
             res["movimientos"].append({
                 "id": len(res["movimientos"]), "lado": lado, "archivo": nombre,
+                "archivo_id": archivo_pk, "clave": f"{archivo_pk}:{numero}",
                 "principal": es_principal, "fila": numero, "fecha": fecha, "monto": m,
                 "descripcion": fila[i_desc] if i_desc is not None else "",
                 "referencia": fila[i_ref] if i_ref is not None else "",
@@ -263,16 +266,23 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
 
 
 # ------------------------------------------------------------- emparejamiento
-ETIQUETAS_ESTADO = {"conciliado": "Conciliado", "sugerido": "Revisar",
+ETIQUETAS_ESTADO = {"conciliado": "Conciliado", "manual": "Manual", "sugerido": "Revisar",
                     "pend_banco": "Solo banco", "pend_empresa": "Solo empresa"}
 
 
-def emparejar(banco, empresa, tolerancia=TOLERANCIA_DIAS):
-    """Empareja movimientos del banco con los de la empresa, por capas.
+def emparejar(banco, empresa, tolerancia=TOLERANCIA_DIAS, manuales=()):
+    """Empareja movimientos del banco con los de la empresa.
 
-    Cada capa exige el mismo monto y es menos estricta que la anterior. Solo se
-    empareja automáticamente cuando hay UN candidato y ese candidato tampoco
-    tiene otro posible (unicidad mutua). Si hay duda queda como "sugerido".
+    1. Se aplican primero las conciliaciones manuales (`manuales`): esos
+       movimientos salen del conjunto. Cada una es un dict con `id`, `claves`
+       (las claves "archivo:fila" de todos sus movimientos) y datos opcionales
+       (`nota`, `usuario`, `creado`, `tipo_label`). Si alguno de sus movimientos
+       ya no está disponible (p. ej. quedó fuera del rango de fechas) se
+       devuelve en `manuales_huerfanas` y no se aplica.
+    2. Con el resto se aplican capas automáticas. Cada capa exige el mismo
+       monto y es menos estricta que la anterior. Solo se empareja cuando hay
+       UN candidato y ese candidato tampoco tiene otro posible (unicidad
+       mutua). Si hay duda queda como "sugerido".
     """
     def dias(b, e):
         return abs((b["fecha"] - e["fecha"]).days)
@@ -288,7 +298,24 @@ def emparejar(banco, empresa, tolerancia=TOLERANCIA_DIAS):
         ("Monto; fecha dentro de la tolerancia", 60, lambda b, e: dias(b, e) <= tolerancia),
     )
 
-    libres_b, libres_e = list(banco), list(empresa)
+    # --- 1) conciliaciones manuales
+    idx_b = {m["clave"]: m for m in banco if m.get("clave")}
+    idx_e = {m["clave"]: m for m in empresa if m.get("clave")}
+    aplicadas, huerfanas, usadas = [], [], set()
+    for g in manuales:
+        bs = [idx_b[c] for c in g["claves"] if c in idx_b]
+        es = [idx_e[c] for c in g["claves"] if c in idx_e]
+        if not bs or not es or len(bs) + len(es) != len(g["claves"]) or usadas.intersection(g["claves"]):
+            huerfanas.append(g)
+            continue
+        usadas.update(g["claves"])
+        aplicadas.append({**g, "bancos": bs, "empresas": es,
+                          "monto": sum((b["monto"] for b in bs), CERO)})
+
+    libres_b = [m for m in banco if m.get("clave") not in usadas]
+    libres_e = [m for m in empresa if m.get("clave") not in usadas]
+
+    # --- 2) capas automáticas
     conciliados = []
     for nombre, confianza, condicion in capas:
         por_monto = defaultdict(list)
@@ -321,45 +348,68 @@ def emparejar(banco, empresa, tolerancia=TOLERANCIA_DIAS):
         cands = sorted((e for e in por_monto.get(b["monto"], ()) if dias(b, e) <= tolerancia),
                        key=lambda e: (dias(b, e), e["id"]))
         if cands:
+            b["sugerido"] = True
+            for e in cands:
+                e["sugerido"] = True
             sugeridos.append({"banco": b, "candidatos": cands})
             en_sugerencia.update(e["id"] for e in cands)
         else:
             pend_banco.append(b)
     pend_empresa = [e for e in libres_e if e["id"] not in en_sugerencia]
 
-    # Filas para la tabla de coincidencias
+    # Filas para la tabla de coincidencias (bancos y empresas son siempre listas)
     filas = []
     for c in conciliados:
-        filas.append({"estado": "conciliado", "banco": c["banco"], "empresas": [c["empresa"]],
+        filas.append({"estado": "conciliado", "bancos": [c["banco"]], "empresas": [c["empresa"]],
                       "regla": c["regla"], "confianza": c["confianza"], "dias": c["dias"]})
-    for s in sugeridos:
-        filas.append({"estado": "sugerido", "banco": s["banco"], "empresas": s["candidatos"],
+    for g in aplicadas:
+        filas.append({"estado": "manual", "bancos": g["bancos"], "empresas": g["empresas"],
+                      "regla": g.get("tipo_label") or "Conciliación manual", "confianza": None, "dias": None,
+                      "manual_id": g["id"], "nota": g.get("nota", ""), "usuario": g.get("usuario", ""),
+                      "creado": g.get("creado")})
+    for s_ in sugeridos:
+        filas.append({"estado": "sugerido", "bancos": [s_["banco"]], "empresas": s_["candidatos"],
                       "regla": "Varios candidatos posibles: requiere revisión", "confianza": None, "dias": None})
     for b in pend_banco:
-        filas.append({"estado": "pend_banco", "banco": b, "empresas": [], "regla": "", "confianza": None, "dias": None})
+        filas.append({"estado": "pend_banco", "bancos": [b], "empresas": [], "regla": "", "confianza": None, "dias": None})
     for e in pend_empresa:
-        filas.append({"estado": "pend_empresa", "banco": None, "empresas": [e], "regla": "", "confianza": None, "dias": None})
+        filas.append({"estado": "pend_empresa", "bancos": [], "empresas": [e], "regla": "", "confianza": None, "dias": None})
     for f in filas:
         f["etiqueta"] = ETIQUETAS_ESTADO[f["estado"]]
-    filas.sort(key=lambda f: ((f["banco"] or f["empresas"][0])["fecha"], (f["banco"] or f["empresas"][0])["id"]))
+
+    def primero(f):
+        m = (f["bancos"] or f["empresas"])[0]
+        return (m["fecha"], m["id"])
+    filas.sort(key=primero)
 
     def cobertura(n, total):
         return round(100 * n / total) if total else None
 
+    conc_b = len(conciliados) + sum(len(g["bancos"]) for g in aplicadas)
+    conc_e = len(conciliados) + sum(len(g["empresas"]) for g in aplicadas)
     resumen = {
         "tolerancia": tolerancia,
         "total_banco": len(banco), "total_empresa": len(empresa),
-        "conciliados": len(conciliados), "sugeridos": len(sugeridos),
+        "conciliados": len(conciliados), "manuales": len(aplicadas),
+        "manuales_huerfanas": len(huerfanas),
+        "conciliados_total": len(conciliados) + len(aplicadas),
+        "sugeridos": len(sugeridos),
         "pend_banco": len(pend_banco), "pend_empresa": len(pend_empresa),
-        "monto_conciliado": sum((c["banco"]["monto"] for c in conciliados), CERO),
+        "monto_conciliado": sum((c["banco"]["monto"] for c in conciliados), CERO)
+                            + sum((g["monto"] for g in aplicadas), CERO),
         "monto_pend_banco": sum((m["monto"] for m in pend_banco), CERO),
         "monto_pend_empresa": sum((m["monto"] for m in pend_empresa), CERO),
-        "cobertura_banco": cobertura(len(conciliados), len(banco)),
-        "cobertura_empresa": cobertura(len(conciliados), len(empresa)),
+        "cobertura_banco": cobertura(conc_b, len(banco)),
+        "cobertura_empresa": cobertura(conc_e, len(empresa)),
     }
+
+    orden = lambda m: (m["fecha"], m["id"])
     return {"filas": filas[:MAX_FILAS_VISTA], "total_filas": len(filas), "resumen": resumen,
             "conciliados": conciliados, "sugeridos": sugeridos,
-            "pend_banco": pend_banco, "pend_empresa": pend_empresa}
+            "pend_banco": pend_banco, "pend_empresa": pend_empresa,
+            "manuales": aplicadas, "manuales_huerfanas": huerfanas,
+            # Todo lo que aún se puede conciliar a mano (pendientes y por revisar)
+            "pendientes": {"banco": sorted(libres_b, key=orden), "empresa": sorted(libres_e, key=orden)}}
 
 
 # -------------------------------------------------------------------- reporte
@@ -396,6 +446,16 @@ def reporte(banco, empresa, coincidencias, conciliacion=None):
             f"Empresa: {_fmt_fecha(conciliacion.empresa_desde)} – {_fmt_fecha(conciliacion.empresa_hasta)}. "
             "Los movimientos fuera del rango del otro lado aparecerán como pendientes."))
 
+    if rs["manuales_huerfanas"]:
+        alertas.append(_aviso(
+            "advertencia", f"{rs['manuales_huerfanas']} conciliación(es) manual(es) no se pudieron aplicar",
+            "Alguno de sus movimientos ya no está disponible, por ejemplo porque quedó fuera del rango de fechas. "
+            "No se borraron: vuelve al rango anterior o deshazlas desde la sección de conciliación manual."))
+    if rs["manuales"]:
+        alertas.append(_aviso(
+            "info", f"{rs['manuales']} conciliación(es) manual(es)",
+            "Fueron hechas por una persona y se pueden deshacer desde la sección de conciliación manual."))
+
     hay_b, hay_e = rs["total_banco"], rs["total_empresa"]
     if not hay_b and not hay_e and not banco["error"] and not empresa["error"]:
         alertas.append(_aviso("error", "No hay movimientos interpretables para comparar",
@@ -403,9 +463,9 @@ def reporte(banco, empresa, coincidencias, conciliacion=None):
     elif hay_b and hay_e:
         alertas.append(_aviso(
             "info", f"{rs['conciliados']} coincidencia(s) automática(s)",
-            f"Cobertura: {rs['cobertura_banco']}% de los movimientos del banco y "
+            f"Cobertura total (automáticas y manuales): {rs['cobertura_banco']}% de los movimientos del banco y "
             f"{rs['cobertura_empresa']}% de los de la empresa (tolerancia de {rs['tolerancia']} día(s))."))
-        if not rs["conciliados"]:
+        if not rs["conciliados"] and not rs["manuales"]:
             alertas.append(_aviso("advertencia", "No se encontró ninguna coincidencia",
                                   "Verifica los rangos de fecha y que los montos usen la misma convención de signo."))
             negativos = {-m["monto"] for m in empresa["movimientos"]}

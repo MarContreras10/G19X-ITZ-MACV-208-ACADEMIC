@@ -15,7 +15,8 @@ Aplicación web hecha con Django que compara los movimientos de un **extracto ba
 
 ## Requisitos
 
-- **Python 3.10 o superior.** `pip` instalará la versión de Django compatible con tu Python.
+- **Python 3.10 o superior.**
+- Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS y python-dotenv), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
 - Git (opcional, para clonar el repositorio).
 
 ## Instalación y ejecución
@@ -33,17 +34,35 @@ python -m venv .venv
 :: 3. Instalar dependencias
 pip install -r requirements.txt
 
-:: 4. Crear la base de datos - Actualmente es SQLite
+:: 4. Crear tu archivo de configuración a partir de la plantilla
+copy .env.example .env
+
+:: 5. Generar una clave secreta y copiarla en .env (DJANGO_SECRET_KEY=...)
+python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+
+:: 6. Crear la base de datos - Actualmente es SQLite
 python manage.py migrate
 
-:: 5. Crear un usuario para iniciar sesión
+:: 7. Crear un usuario para iniciar sesión
 python manage.py createsuperuser
 
-:: 6. Iniciar el servidor
+:: 8. Iniciar el servidor
 python manage.py runserver
 ```
 
-Abre **http://127.0.0.1:8000/** e inicia sesión con el usuario del paso 5.
+Abre **http://127.0.0.1:8000/** e inicia sesión con el usuario del paso 7.
+
+### Configuración (`.env`)
+
+La configuración sensible **no está en el código**: se lee del archivo `.env`, que no se sube a Git. Si falta la clave, el proyecto no arranca y muestra un mensaje que lo indica.
+
+| Variable | Obligatoria | Descripción |
+|---|---|---|
+| `DJANGO_SECRET_KEY` | Sí | Clave secreta de Django. Debe ser única y no compartirse. |
+| `DJANGO_DEBUG` | No (por defecto `False`) | `True` solo en desarrollo. Con `True` Django muestra detalles internos cuando hay un error. |
+| `DJANGO_ALLOWED_HOSTS` | No (por defecto `127.0.0.1,localhost`) | Dominios o IPs permitidos, separados por comas. |
+
+Para trabajar en tu computadora, deja `DJANGO_DEBUG=True` en tu `.env`.
 
 > En Linux/macOS activa el entorno con `source .venv/bin/activate`.
 
@@ -95,6 +114,8 @@ Un par se concilia solo si **ambos movimientos tienen un único candidato**. Si 
 python manage.py test conciliaciones
 ```
 
+(Requiere que exista tu archivo `.env` con la clave configurada.)
+
 Cubren la lectura de archivos con formatos distintos, el emparejamiento (tolerancia, ambigüedad, referencia, unicidad) y las alertas del reporte.
 
 ### Pruebas con los datos de ejemplo
@@ -135,7 +156,9 @@ La carpeta `sample_data/` contiene:
 ```
 conciliacion_bancaria/
 ├── manage.py
-├── requirements.txt
+├── requirements.txt             # Dependencias con versión fija
+├── .env.example                 # Plantilla de configuración (se sube a Git)
+├── .env                         # Tu configuración real (NO se sube a Git)
 ├── config/                      # Configuración de Django (settings, urls)
 ├── conciliaciones/
 │   ├── models.py                # Conciliacion, ArchivoConciliacion
@@ -172,7 +195,7 @@ media/
 - La tolerancia de fecha no se guarda; vuelve a 3 días al recargar la página.
 - Todavía no hay conciliación manual ni deshacer; los casos *Por revisar* solo se muestran.
 - El reporte no se puede exportar.
-- Configuración pensada para desarrollo (`DEBUG` activo, SQLite, `SECRET_KEY` de ejemplo). Antes de publicarlo, mueve la clave a una variable de entorno y usa una base de datos de producción.
+- Pensado para desarrollo local con SQLite. Antes de publicarlo en un servidor: `DJANGO_DEBUG=False`, una `DJANGO_SECRET_KEY` nueva y `DJANGO_ALLOWED_HOSTS` con tu dominio, una base de datos de producción, HTTPS y un servidor de producción en lugar de `runserver`.
 
 ## Documentación relacionada
 

@@ -1,8 +1,9 @@
 {% with r=reporte.resumen %}
 <div class="kpis">
   <div class="kpi" style="--k:#15803d">
-    <div class="t">Conciliados</div><div class="n">{{ r.conciliados }}</div>
+    <div class="t">Conciliados</div><div class="n">{{ r.conciliados_total }}</div>
     <div class="s">{% if r.total_banco and r.total_empresa %}{{ r.cobertura_banco }}% del banco · {{ r.cobertura_empresa }}% de la empresa{% else %}Sin datos para comparar{% endif %}</div>
+    <div class="s">{{ r.conciliados }} automático(s) · {{ r.manuales }} manual(es)</div>
   </div>
   <div class="kpi" style="--k:#b45309">
     <div class="t">Por revisar</div><div class="n">{{ r.sugeridos }}</div>

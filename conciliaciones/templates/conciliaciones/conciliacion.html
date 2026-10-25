@@ -122,6 +122,35 @@
   .origen{font-size:11px;font-weight:700;border-radius:4px;padding:1px 6px;color:#fff}
   .origen-banco{background:var(--banco)}.origen-empresa{background:var(--empresa)}
 
+  /* Conciliación manual */
+  .msg.warning{background:#fef3c7}
+  .st-manual{color:#6d28d9;background:#ede9fe;border-color:#c4b5fd}
+  tr.fila-manual td.marca{--c:#7c3aed}
+  form.inline{display:inline;margin:0}
+  .link-btn{background:none;border:0;padding:0;margin-left:6px;color:#1d4ed8;cursor:pointer;font-size:12px;text-decoration:underline}
+  .link-btn.ok{color:#15803d;font-weight:600}
+  .regla-txt+form.inline .link-btn{margin-left:0}
+  .mpanes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .panel-head .mbuscar{width:130px;padding:3px 8px;border:1px solid #d1d5db;border-radius:6px;font-size:12px}
+  .mlista{height:330px;overflow:auto}
+  .mrow{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #eef0f3;border-left:4px solid transparent;font-size:13px;cursor:pointer;margin:0;color:#1f2937}
+  .mrow:hover{background:#f8fafc}
+  .mrow[hidden]{display:none}
+  .mrow input{flex:none;width:16px;height:16px;margin:0;accent-color:var(--c)}
+  .mrow .mf{flex:none;color:#6b7280;font-size:12px;width:78px}
+  .mrow .md{flex:1;min-width:0}
+  .mrow .mm{flex:none;font-variant-numeric:tabular-nums;font-weight:600}
+  .mrow.sel{background:var(--bg);border-left-color:var(--c)}
+  .mrow.coincide{box-shadow:inset 0 0 0 2px #f59e0b;background:#fffbeb}
+  .mbar{position:sticky;bottom:8px;z-index:5;display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-top:12px;padding:10px 14px;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 4px 14px #0002}
+  .mbar .msum{font-size:13px}
+  .mbar .mnota{flex:1;min-width:140px;padding:6px 8px;border:1px solid #d1d5db;border-radius:6px}
+  .mbar.ok{border-color:#16a34a;box-shadow:0 4px 14px #16a34a33}
+  .mbar.ok .mdif b{color:#15803d}
+  .mbar.mal .mdif b{color:#b42318}
+  .btn.sec{background:#6b7280}
+  tr.huerfana td{background:#fffbeb}
+  @media(max-width:1100px){.mpanes{grid-template-columns:1fr}}
   @media(max-width:1100px){.layout{grid-template-columns:1fr}.side{position:static;max-height:none}.previews{grid-template-columns:1fr}}
   @media(max-width:720px){.kpis{grid-template-columns:repeat(2,1fr)}}
 </style>
@@ -183,9 +212,9 @@
       {% endif %}
     </div>
 
-    {% if object %}{% include "conciliaciones/_coincidencias.html" %}{% endif %}
+    {% if object %}{% include "conciliaciones/_coincidencias.html" %}{% include "conciliaciones/_manual.html" %}{% endif %}
 
-    <div class="card">
+    <div class="card" id="reporte">
       <h3>Reporte</h3>
       {% if object %}
         {% include "conciliaciones/_reporte.html" %}
@@ -248,6 +277,58 @@ document.querySelectorAll('.dz').forEach(function (dz) {
   });
   dz.addEventListener('drop', function (e) { agregar(e.dataTransfer.files); });
 });
+
+/* Conciliación manual: sumas de lo seleccionado, resaltado por monto y búsqueda */
+(function () {
+  var form = document.getElementById('form-manual');
+  if (!form) return;
+  var btn = document.getElementById('btn-conciliar'), bar = document.getElementById('mbar');
+  function centavos(v) { return Math.round(parseFloat(v) * 100); }
+  function fmt(c) { return (c / 100).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}); }
+
+  function actualizar() {
+    var t = {banco: {n: 0, suma: 0, montos: {}}, empresa: {n: 0, suma: 0, montos: {}}};
+    ['banco', 'empresa'].forEach(function (lado) {
+      form.querySelectorAll('input[name=' + lado + ']').forEach(function (c) {
+        var fila = c.closest('.mrow');
+        fila.classList.toggle('sel', c.checked);
+        if (c.checked) { var m = centavos(fila.dataset.monto); t[lado].n++; t[lado].suma += m; t[lado].montos[m] = true; }
+      });
+    });
+    // Resalta, en el lado contrario, los movimientos con el mismo monto que uno marcado
+    [['banco', 'empresa'], ['empresa', 'banco']].forEach(function (par) {
+      form.querySelectorAll('input[name=' + par[0] + ']').forEach(function (c) {
+        var fila = c.closest('.mrow');
+        fila.classList.toggle('coincide', !c.checked && t[par[1]].montos[centavos(fila.dataset.monto)] === true);
+      });
+    });
+    var dif = t.banco.suma - t.empresa.suma;
+    var ok = t.banco.n > 0 && t.empresa.n > 0 && dif === 0;
+    document.getElementById('n-b').textContent = t.banco.n;   document.getElementById('s-b').textContent = fmt(t.banco.suma);
+    document.getElementById('n-e').textContent = t.empresa.n; document.getElementById('s-e').textContent = fmt(t.empresa.suma);
+    document.getElementById('s-d').textContent = fmt(dif);
+    btn.disabled = !ok;
+    bar.classList.toggle('ok', ok);
+    bar.classList.toggle('mal', !ok && (t.banco.n > 0 || t.empresa.n > 0) && dif !== 0);
+  }
+
+  form.addEventListener('change', function (e) { if (e.target.type === 'checkbox') actualizar(); });
+  document.getElementById('btn-limpiar').addEventListener('click', function () {
+    form.querySelectorAll('.mrow input:checked').forEach(function (c) { c.checked = false; });
+    actualizar();
+  });
+  form.querySelectorAll('.mbuscar').forEach(function (campo) {
+    campo.addEventListener('input', function () {
+      var q = campo.value.trim().toLowerCase();
+      form.querySelectorAll('[data-lista=' + campo.dataset.panel + '] .mrow').forEach(function (fila) {
+        fila.hidden = q !== '' && fila.dataset.texto.indexOf(q) === -1;
+      });
+    });
+  });
+  // El botón de buscar no debe enviar el formulario al pulsar Enter
+  form.addEventListener('keydown', function (e) { if (e.key === 'Enter' && e.target.matches('.mbuscar')) e.preventDefault(); });
+  actualizar();
+})();
 
 /* Filtros de la tabla de coincidencias */
 document.querySelectorAll('[data-filtro]').forEach(function (btn) {
