@@ -6,11 +6,13 @@ coincidencias, reporte y balance.
 """
 import csv
 import io
+from copy import copy
 from decimal import Decimal
 from xml.sax.saxutils import escape
 
 from django.utils import timezone
 from openpyxl import Workbook
+from openpyxl.cell.cell import Cell
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.graphics.charts.barcharts import HorizontalBarChart, VerticalBarChart
@@ -153,6 +155,29 @@ _NUM = '#,##0.00;[Red]-#,##0.00'
 _FECHA = "dd/mm/yyyy"
 
 
+def _estilo(ws, formato=None, relleno=None, fuente=None, wrap=True):
+    """Estilo de celda ya calculado, listo para copiar.
+
+    Asignar bordes, alineación o formato celda por celda obliga a openpyxl a calcular un hash de
+    cada estilo cada vez: con miles de filas el archivo tardaba varios segundos en generarse.
+    Se arma el estilo una sola vez y a cada celda se le copia (ver `_aplicar`).
+    """
+    plantilla = Cell(ws)   # celda suelta: no se agrega a la hoja
+    plantilla.border = _BORDE
+    plantilla.alignment = Alignment(vertical="top", wrap_text=wrap)
+    if formato:
+        plantilla.number_format = formato
+    if relleno:
+        plantilla.fill = PatternFill("solid", fgColor=relleno)
+    if fuente:
+        plantilla.font = fuente
+    return plantilla._style
+
+
+def _aplicar(celda, estilo):
+    celda._style = copy(estilo)
+
+
 def _encabezado(ws, fila, textos, col_inicio=1):
     for i, t in enumerate(textos):
         c = ws.cell(row=fila, column=col_inicio + i, value=t)
@@ -240,19 +265,20 @@ def _hoja_balance_match(ws, d):
     ws.row_dimensions[1].height = 46
     for i, (clave, _, ancho) in enumerate(COLUMNAS_MATCH, start=1):
         ws.column_dimensions[get_column_letter(i)].width = ancho
+    st_texto, st_fecha, st_monto = _estilo(ws), _estilo(ws, _FECHA), _estilo(ws, _NUM)
+    st_estado = {k: _estilo(ws, relleno=rel, fuente=Font(bold=True)) for k, (_, rel, _) in ESTADOS.items()}
     for r, f in enumerate(filas, start=2):
         for i, (clave, _, _) in enumerate(COLUMNAS_MATCH, start=1):
             v = f[clave]
             celda = ws.cell(row=r, column=i, value=v)
-            celda.border = _BORDE
-            celda.alignment = Alignment(vertical="top", wrap_text=True)
-            if hasattr(v, "year"):
-                celda.number_format = _FECHA
+            if i == 2:                                   # columna «Estado»: relleno de color
+                _aplicar(celda, st_estado[f["estado_clave"]])
+            elif hasattr(v, "year"):
+                _aplicar(celda, st_fecha)
             elif isinstance(v, Decimal):
-                celda.number_format = _NUM
-        _, relleno, _ = ESTADOS[f["estado_clave"]]
-        ws.cell(row=r, column=2).fill = PatternFill("solid", fgColor=relleno)
-        ws.cell(row=r, column=2).font = Font(bold=True)
+                _aplicar(celda, st_monto)
+            else:
+                _aplicar(celda, st_texto)
     ultima = len(filas) + 1
     ws.freeze_panes = "C2"
     if filas:
@@ -277,16 +303,20 @@ def _hoja_pendientes(ws, d):
             filas.append([lado, "Por revisar" if m.get("sugerido") else "Sin pareja", m["fecha"], m["descripcion"],
                           m["referencia"], m["monto"], m["archivo"], m["fila"]])
     _encabezado(ws, 1, ["Lado", "Estado", "Fecha", "Descripción", "Referencia", "Monto", "Archivo", "Fila en el archivo"])
+    st_texto, st_fecha, st_monto = _estilo(ws, wrap=False), _estilo(ws, _FECHA, wrap=False), _estilo(ws, _NUM, wrap=False)
+    st_lado = {"Banco": _estilo(ws, fuente=Font(bold=True, color=AZUL), wrap=False),
+               "Empresa": _estilo(ws, fuente=Font(bold=True, color=VERDE_AZULADO), wrap=False)}
     for r, fila in enumerate(filas, start=2):
         for c, v in enumerate(fila, start=1):
             celda = ws.cell(row=r, column=c, value=v)
-            celda.border = _BORDE
-            if hasattr(v, "year"):
-                celda.number_format = _FECHA
+            if c == 1:
+                _aplicar(celda, st_lado[v])
+            elif hasattr(v, "year"):
+                _aplicar(celda, st_fecha)
             elif isinstance(v, Decimal):
-                celda.number_format = _NUM
-        color = AZUL if fila[0] == "Banco" else VERDE_AZULADO
-        ws.cell(row=r, column=1).font = Font(bold=True, color=color)
+                _aplicar(celda, st_monto)
+            else:
+                _aplicar(celda, st_texto)
     if not filas:
         ws.cell(row=2, column=1, value="No quedan movimientos pendientes.").font = Font(italic=True)
     else:

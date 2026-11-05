@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Stack actual** | Python · Django · SQLite (desarrollo) |
+| **Stack actual** | Python · Django · SQLite (desarrollo) · openpyxl y ReportLab (exportación) |
 
 ---
 
@@ -67,43 +67,43 @@ Iniciar sesión
 ## 7. Requerimientos funcionales
 
 ### 7.1 Acceso al sistema
-- **RF-01** El sistema debe requerir un incio de sesion para acceder a cualquier pantalla.
-- **RF-02** Cada usuario debe ver unicamente sus propias conciliaciones.
-- **RF-03** El sistema debe mostrar un historial de conciliaciones y permitir reabrir cada una.
+- **RF-01** El sistema debe requerir un incio de sesion para acceder a cualquier pantalla. — **[Hecho]**
+- **RF-02** Cada usuario debe ver unicamente sus propias conciliaciones. — **[Hecho]**
+- **RF-03** El sistema debe mostrar un historial de conciliaciones y permitir reabrir cada una. — **[Hecho]**
 
 ### 7.2 Carga de archivos
-- **RF-04** El usuario debe poder indicar un rango de fechas para el banco  otro para la empresa.
-- **RF-05** El usuario debe poder cargar un archivo principal y varios complementarios.
-- **RF-06** El usuario debe poder cargar un archivo principal y varios complemetnarios en caso de ser necesario.
-- **RF-07** El sistema debe abisar si un archivo complementario repite filas ya existentes o tiene columnas que no coinciden con el principal
-- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.).
+- **RF-04** El usuario debe poder indicar un rango de fechas para el banco  otro para la empresa. — **[Hecho]** El rango también puede tomarse del archivo principal.
+- **RF-05** El usuario debe poder cargar un archivo principal y varios complementarios. — **[Hecho]**
+- **RF-06** El usuario debe poder cargar un archivo principal y varios complemetnarios en caso de ser necesario. — **[Hecho]** (es el mismo requerimiento que RF-05).
+- **RF-07** El sistema debe abisar si un archivo complementario repite filas ya existentes o tiene columnas que no coinciden con el principal — **[Hecho]** Avisa filas repetidas entre archivos y columnas que no coinciden; no excluye las repetidas de los totales.
+- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.). — **[Parcial]** Hoy solo CSV; Excel es lo siguiente. PDF, SWIFT e imágenes están pendientes.
 
 ### 7.3 Interpretacion de datos
-- **RF-09** El sistema debe detectar automaticamente codificacion, separador, formato de fecha y formato numerico.
-- **RF-10** El sistema debe sugerir a que campo corresponde cada columna (fecha, monto, descripcion, referencia) y permitir al usuario corregirlo manualmente
-- **RF-11** El sistema debe soportar montos en una sola columna con signo o en dos columnas (cargo y abono).
-- **RF-12** Las filas que no se puedan interpretar deben listarse con su motivo, nunca descartarse en silencio.
+- **RF-09** El sistema debe detectar automaticamente codificacion, separador, formato de fecha y formato numerico. — **[Parcial]** En CSV detecta codificación (UTF-8/Latin-1), separador, 4 formatos de fecha y montos con `$`, comas y paréntesis; asume punto decimal.
+- **RF-10** El sistema debe sugerir a que campo corresponde cada columna (fecha, monto, descripcion, referencia) y permitir al usuario corregirlo manualmente — **[Parcial]** Sugiere la columna por el nombre del encabezado; falta el selector manual.
+- **RF-11** El sistema debe soportar montos en una sola columna con signo o en dos columnas (cargo y abono). — **[Hecho]**
+- **RF-12** Las filas que no se puedan interpretar deben listarse con su motivo, nunca descartarse en silencio. — **[Hecho]** Se listan con archivo, número de fila y motivo (el reporte muestra hasta 5 ejemplos).
 
 ### 7.4 Comparacion y emparejamiento
-- **RF-13** El sistema debe emparejar movimientos entre banco y empresa mediante reglas por capas (monto, fecha, tolerancia de dias, referencia).
-- **RF-14** Cada emparejamiento debe indicar la regla que lo origino y un nivel de confianza.
-- **RF-15** Si un movimiento tiene varios candidatos posibles, el sistema no debe emparejarlo solo, debe dejarlo como sugerencia.
-- **RF-16** El sistema debe soportar emparejamientos de uno a varios movimientos (una suma contra varios).
-- **RF-17** El sistema debe comparar por similitud de texto cuando no haya referencia.
+- **RF-13** El sistema debe emparejar movimientos entre banco y empresa mediante reglas por capas (monto, fecha, tolerancia de dias, referencia). — **[Hecho]** 4 capas.
+- **RF-14** Cada emparejamiento debe indicar la regla que lo origino y un nivel de confianza. — **[Hecho]**
+- **RF-15** Si un movimiento tiene varios candidatos posibles, el sistema no debe emparejarlo solo, debe dejarlo como sugerencia. — **[Hecho]**
+- **RF-16** El sistema debe soportar emparejamientos de uno a varios movimientos (una suma contra varios). — **[Parcial]** Se puede hacer manualmente (1 a varios y varios a varios); falta el emparejamiento automático.
+- **RF-17** El sistema debe comparar por similitud de texto cuando no haya referencia. — **[Pendiente]**
 
 ### 7.5 Revision y ajustes manuales
-- **RF-18** El sistema debe mostrar una vista previa con los movimientos de ambos lados y su estado (conciliado, sugerido, pendiente).
-- **RF-19** El usuario debe poder aceptar o rechazar una sugerencia.
-- **RF-20** El usuario debe poder emparejar movimientso manualmente, siempre que los totales en ambos lados coincidan.
-- **RF-21** El usuario debe poder deshacer cualquier ermparejamiento.
-- **RF-22** El usuario debe poder marcar una partida pendiente con una nota de justificacion.
-- **RF-23** El sistema debe registrar quien realizo cada accion y cuando
+- **RF-18** El sistema debe mostrar una vista previa con los movimientos de ambos lados y su estado (conciliado, sugerido, pendiente). — **[Hecho]** Tabla de coincidencias con estados, colores y filtros, además de la vista previa de los archivos.
+- **RF-19** El usuario debe poder aceptar o rechazar una sugerencia. — **[Parcial]** Se puede aceptar; falta rechazar.
+- **RF-20** El usuario debe poder emparejar movimientso manualmente, siempre que los totales en ambos lados coincidan. — **[Hecho]**
+- **RF-21** El usuario debe poder deshacer cualquier ermparejamiento. — **[Hecho]**
+- **RF-22** El usuario debe poder marcar una partida pendiente con una nota de justificacion. — **[Pendiente]** Hoy la nota se agrega al conciliar manualmente, no a una partida pendiente.
+- **RF-23** El sistema debe registrar quien realizo cada accion y cuando — **[Parcial]** Se guarda quién y cuándo creó cada conciliación manual; falta registrar el deshacer y el resto de acciones.
 
 ### 7.6 Reporte 
-- **RF-24** El reporte debe mostrar, por lado, el numero de movimientos, ingresos, egresos, neto y la diferencia entre ambos.
-- **RF-25** El reporte debe listar los datos faltantes: movimientos presentes solo en el banco, solo en la empresa, campos vacios, duplicados y filas no interpretadas.
-- **RF-26** El reporte debe sugrerir la posible causa de cada partida pendiente cuando sea identificable (por ejemplo, comision bancaria).
-- **RF-27** El usuario debe poder exportar el reporte (Excel o PDF).
+- **RF-24** El reporte debe mostrar, por lado, el numero de movimientos, ingresos, egresos, neto y la diferencia entre ambos. — **[Hecho]**
+- **RF-25** El reporte debe listar los datos faltantes: movimientos presentes solo en el banco, solo en la empresa, campos vacios, duplicados y filas no interpretadas. — **[Parcial]** Se listan los movimientos solo en el banco y solo en la empresa, y las filas repetidas o no interpretadas; los campos vacíos aún no se reportan.
+- **RF-26** El reporte debe sugrerir la posible causa de cada partida pendiente cuando sea identificable (por ejemplo, comision bancaria). — **[Pendiente]** Hay sugerencias generales en los avisos, pero no una causa por partida.
+- **RF-27** El usuario debe poder exportar el reporte (Excel o PDF). — **[Hecho]** Excel (4 hojas, con tabla de balance/match), PDF (con gráficas y observaciones) y CSV.
 
 ## 8. Modelo común de datos
 
@@ -123,18 +123,22 @@ Todo archivo, sin importar su origen, se transforma a un **movimiento normalizad
 
 Esto es lo que permite comparar archivos que "no son los mismos": se comparan movimientos normalizados, no archivos.
 
+> **Estado de implementación:** hoy los movimientos se normalizan en memoria cada vez que se abre la conciliación y no se guardan en la base de datos (incremento 1 de la hoja de ruta). Cada movimiento se identifica por su **archivo y su número de fila** (el encabezado es la fila 1), y así se guardan las conciliaciones manuales. El estado (`pendiente`, `sugerido`, `conciliado`, y `manual`) se calcula al emparejar.
+
 ## 9. Algoritmos de análisis
 
 Se ejecutan por **capas**; lo que una capa empareja con seguridad sale del conjunto para la siguiente.
 
-| Capa | Regla | Confianza |
-|---|---|---|
-| 1 | Monto exacto + misma fecha + misma referencia | Alta |
-| 2 | Monto exacto + fecha dentro de la tolerancia (± N días) + referencia coincidente | Alta |
-| 3 | Monto exacto + fecha en tolerancia, sin referencia | Media |
-| 4 | Monto exacto + descripción similar (similitud de texto), fecha en tolerancia ampliada | Media |
-| 5 | Suma de varios movimientos de un lado = un movimiento del otro (1 a N) | Media-baja → siempre a revisión |
-| 6 | Monto con diferencia pequeña + referencia igual (posible error de captura) | Baja → siempre a revisión |
+| Capa | Regla | Confianza | Estado |
+|---|---|---|---|
+| 1 | Monto exacto + misma fecha + misma referencia | Alta | **Hecho** (100 %) |
+| 2 | Monto exacto + fecha dentro de la tolerancia (± N días) + referencia coincidente | Alta | **Hecho** (90 %) |
+| 3 | Monto exacto + fecha en tolerancia, sin referencia | Media | **Hecho**, en dos pasos: misma fecha (75 %) y fecha dentro de la tolerancia (60 %) |
+| 4 | Monto exacto + descripción similar (similitud de texto), fecha en tolerancia ampliada | Media | **Pendiente** |
+| 5 | Suma de varios movimientos de un lado = un movimiento del otro (1 a N) | Media-baja → siempre a revisión | **Parcial**: solo de forma manual |
+| 6 | Monto con diferencia pequeña + referencia igual (posible error de captura) | Baja → siempre a revisión | **Pendiente** |
+
+Además de las capas, las conciliaciones manuales se aplican primero y sus movimientos salen del conjunto antes del emparejamiento automático. Un par solo se concilia automáticamente si **ambos movimientos tienen un único candidato** (unicidad mutua); si no, queda como sugerido.
 
 **Criterios de decisión**
 - Si una fila tiene un único candidato claro, se empareja.
@@ -148,12 +152,12 @@ Se ejecutan por **capas**; lo que una capa empareja con seguridad sale del conju
 
 ## 10. Requerimientos no funcionales
 
-- **RNF-01** Los montos deben manejarse con precision decimal, nunca con punto flotante.
-- **RNF-02** Ante la duda, el sistema debe dejar un movimiento penditente en lugar de emparejarlo incorrectamente.
-- **RNF-03** Cada movimiento debe poder rastrearse hasta su archivo y su fila original.
-- **RNF-04** Un archivo de hasta 10,000 filas debe procesarse en un tiempo razonable sin que la interfaz se congele.
-- **RNF-05** Un usuario debe poder completar una conciliacion sin editar los archivos originales.
-- **RNF-06** La logica de emparejamiento debe estar separada de la interfaz y cubierta por pruebas automaticas.
+- **RNF-01** Los montos deben manejarse con precision decimal, nunca con punto flotante. — **[Hecho]**
+- **RNF-02** Ante la duda, el sistema debe dejar un movimiento penditente en lugar de emparejarlo incorrectamente. — **[Hecho]**
+- **RNF-03** Cada movimiento debe poder rastrearse hasta su archivo y su fila original. — **[Hecho]** Cada movimiento guarda su archivo y su fila; el Excel incluye la fila de origen.
+- **RNF-04** Un archivo de hasta 10,000 filas debe procesarse en un tiempo razonable sin que la interfaz se congele. — **[Hecho]** Medido con 10,000 filas por lado (entorno de pruebas): abrir la conciliación ≈ 1 s, Excel ≈ 3 s, PDF ≈ 1 s. El procesamiento es síncrono.
+- **RNF-05** Un usuario debe poder completar una conciliacion sin editar los archivos originales. — **[Parcial]** Se cumple con CSV cuyas columnas se reconocen por nombre; falta el selector manual.
+- **RNF-06** La logica de emparejamiento debe estar separada de la interfaz y cubierta por pruebas automaticas. — **[Hecho]** El motor está en `services.py`, separado de la interfaz, con 62 pruebas automáticas.
 
 ## 11. Métricas de éxito
 
@@ -176,13 +180,15 @@ Se ejecutan por **capas**; lo que una capa empareja con seguridad sale del conju
 
 ## 13. Hoja de ruta (por incrementos pequeños)
 
-1. **Persistir movimientos** normalizados en la base de datos.
-2. **Selector manual de columnas** y detección de duplicados.
-3. **Emparejamiento 1 a 1** exacto (monto + fecha) con pruebas.
-4. **Estados en la vista previa** (colores) para revisar el resultado.
-5. **Tolerancias y referencia**; casos ambiguos a revisión.
-6. **Reporte de partidas pendientes** y datos faltantes.
-7. **Conciliación manual** y deshacer.
-8. **Excel (.xlsx)** como formato de entrada.
-9. **Exportación del reporte.**
-10. Etapas posteriores: 1 a N, PDF/OCR, roles y aprobación.
+1. **Persistir movimientos** normalizados en la base de datos. — **[Pendiente]**
+2. **Selector manual de columnas** y detección de duplicados. — **[Parcial]** Los duplicados se avisan; falta el selector manual.
+3. **Emparejamiento 1 a 1** exacto (monto + fecha) con pruebas. — **[Hecho]**
+4. **Estados en la vista previa** (colores) para revisar el resultado. — **[Hecho]** En la tabla de coincidencias.
+5. **Tolerancias y referencia**; casos ambiguos a revisión. — **[Hecho]**
+6. **Reporte de partidas pendientes** y datos faltantes. — **[Parcial]** Falta la causa probable por partida.
+7. **Conciliación manual** y deshacer. — **[Hecho]** Faltan rechazar sugerencias y registrar el deshacer.
+8. **Excel (.xlsx)** como formato de entrada. — **[Pendiente]**
+9. **Exportación del reporte.** — **[Hecho]** Excel, PDF y CSV.
+10. Etapas posteriores: 1 a N, PDF/OCR, roles y aprobación. — **[Pendiente]**
+
+**Se implementó además, sin estar en la hoja de ruta:** rango de fechas automático a partir del archivo principal; conciliación manual de 1 a N y N a N; caja de avisos del reporte (errores, advertencias, sugerencias e informativos); cuadre de la diferencia (balance) en las exportaciones; y configuración sensible fuera del código mediante variables de entorno.

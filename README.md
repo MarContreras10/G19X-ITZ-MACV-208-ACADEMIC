@@ -8,15 +8,17 @@ Aplicación web hecha con Django que compara los movimientos de un **extracto ba
 
 - **Acceso:** inicio de sesión; cada usuario ve solo sus conciliaciones.
 - **Inicio:** botón de nueva conciliación e historial.
-- **Carga de archivos:** por cada lado (banco y empresa), un rango de fechas, un archivo principal y varios complementarios. Selectores con arrastrar y soltar.
+- **Carga de archivos:** por cada lado (banco y empresa), un rango de fechas, un archivo principal y varios complementarios. Selectores con arrastrar y soltar. Si no escribes las fechas, el rango se toma del archivo principal.
 - **Vista previa:** paneles desplazables con las filas de cada lado. Azul = banco, verde = empresa; los complementarios se distinguen con borde punteado y un **+**. Las columnas que se comparan aparecen resaltadas.
 - **Tabla de coincidencias:** muestra cada movimiento como *Conciliado*, *Por revisar*, *Solo banco* o *Solo empresa*, con la regla aplicada y su confianza. Tiene filtros y una tolerancia de fecha ajustable.
+- **Conciliación manual:** una sección con los movimientos pendientes de cada lado. Marcas los que se corresponden, la barra inferior suma cada lado y el botón **Conciliar** se activa cuando los totales coinciden (1 a 1, 1 a varios o varios a varios). Los casos *Por revisar* se pueden **aceptar** con un clic desde la tabla, y cualquier conciliación manual se puede **deshacer**.
 - **Reporte:** tarjetas de resumen, totales (movimientos, ingresos, egresos, neto), diferencia banco − empresa y una caja desplegable de **avisos** (errores, advertencias, sugerencias e informativos).
+- **Exportación:** el reporte se descarga en **Excel**, **PDF** o **CSV** (ver más abajo).
 
 ## Requisitos
 
 - **Python 3.10 o superior.**
-- Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS y python-dotenv), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
+- Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS, python-dotenv, openpyxl y reportlab), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
 - Git (opcional, para clonar el repositorio).
 
 ## Instalación y ejecución
@@ -69,10 +71,12 @@ Para trabajar en tu computadora, deja `DJANGO_DEBUG=True` en tu `.env`.
 ## Uso rápido
 
 1. En **Inicio**, pulsa **+ Nueva conciliación**.
-2. Elige el rango de fechas del banco y de la empresa.
+2. Elige el rango de fechas del banco y de la empresa, o déjalo vacío: se toma del archivo principal (al elegirlo, las fechas se rellenan solas).
 3. Carga el archivo principal de cada lado y, si quieres, archivos complementarios.
 4. Pulsa **Cargar y analizar**. Se abre la conciliación con la vista previa, las coincidencias y el reporte.
-5. Para volver a analizar con otros archivos o fechas, cámbialos en la barra lateral y pulsa **Actualizar análisis**.
+5. Para volver a analizar con otros archivos o fechas, cámbialos en la barra lateral y pulsa **Actualizar análisis**. Con **Usar este rango** vuelves al rango del archivo principal.
+6. Resuelve lo pendiente en la sección **Conciliación manual** o acepta las sugerencias desde la tabla de coincidencias.
+7. Descarga el reporte con los botones **Excel**, **PDF** o **CSV** del apartado *Reporte*.
 
 ## Formato de los archivos
 
@@ -88,6 +92,7 @@ Por ahora solo se aceptan archivos **`.csv`** con encabezados en la primera fila
 
 - Se detectan solos la **codificación** (UTF-8 o Latin-1) y el **separador** (`,` `;` tabulador o `|`).
 - Formatos de fecha aceptados: `AAAA-MM-DD`, `DD/MM/AAAA`, `DD-MM-AAAA` y `DD/MM/AA`.
+- **Montos:** se aceptan `$`, comas de miles y paréntesis como negativo. Se asume **punto decimal** (no se leen formatos como `1.234,56`).
 - **Signo del monto:** positivo = ingreso, negativo = egreso. Con cargo y abono se calcula *abono − cargo*. Si un archivo usa la convención contraria, no habrá coincidencias; el reporte lo avisa.
 - Los **complementarios** se alinean al principal por el nombre de la columna. Las columnas que el principal no tiene se ignoran (y se avisa).
 
@@ -104,6 +109,25 @@ Se exige siempre el **mismo monto** y se aplican capas, de la más estricta a la
 
 Un par se concilia solo si **ambos movimientos tienen un único candidato**. Si hay más de uno, queda como **Por revisar** y no se empareja automáticamente. La tolerancia por defecto es de **3 días** y se cambia en la tabla de coincidencias (o con `?tol=N` en la URL).
 
+### Conciliación manual
+
+- Las conciliaciones manuales se aplican **primero**: sus movimientos salen del conjunto y el resto se vuelve a emparejar (por eso, al resolver un caso, otro ambiguo puede resolverse solo).
+- Cada una guarda quién la hizo, cuándo, si fue manual o una sugerencia aceptada, y una nota opcional.
+- El servidor **recalcula los montos desde los archivos** y rechaza movimientos ya conciliados, inexistentes o de otra conciliación; los totales de ambos lados deben coincidir.
+- Cada movimiento se identifica por su **archivo y número de fila**. Por eso, **reemplazar un archivo principal o quitar un complementario deshace** las conciliaciones manuales que lo usaban (el sistema avisa). Si cambias el rango de fechas y un movimiento queda fuera, la conciliación se conserva y aparece como *No aplicada*.
+
+### Exportación del reporte
+
+Los botones están en el apartado *Reporte* y respetan la tolerancia de fecha que estés usando.
+
+| Formato | Contenido |
+|---|---|
+| **Excel** (`.xlsx`) | 4 hojas: **Resumen** (periodos, resultados, totales y balance), **Balance-Match** (la tabla revisada, una fila por pareja o pendiente, con filtros y totales), **Pendientes** (con la fila de cada movimiento en su archivo) y **Avisos**. |
+| **PDF** | Resumen, balance, 3 gráficas (resultado, banco contra empresa, movimientos por día), observaciones con todos los avisos, pendientes principales y conciliaciones manuales. |
+| **CSV** | Solo la tabla de balance/match, en UTF-8 con BOM para que Excel respete los acentos. |
+
+El **balance** cuadra la diferencia: *neto del banco − partidas sin conciliar del banco + partidas sin conciliar de la empresa = neto de la empresa*. Si no cuadra, el reporte muestra la diferencia sin explicar (suele deberse a filas sin fecha o sin monto).
+
 ---
 
 ## Pruebas
@@ -116,7 +140,7 @@ python manage.py test conciliaciones
 
 (Requiere que exista tu archivo `.env` con la clave configurada.)
 
-Cubren la lectura de archivos con formatos distintos, el emparejamiento (tolerancia, ambigüedad, referencia, unicidad) y las alertas del reporte.
+Son **62 pruebas**: lectura de archivos con formatos distintos, emparejamiento (tolerancia, ambigüedad, referencia, unicidad), alertas del reporte, conciliación manual (permisos, validaciones, deshacer, efecto de reemplazar archivos), rango de fechas automático y exportación (Excel, PDF y CSV).
 
 ### Pruebas con los datos de ejemplo
 
@@ -128,8 +152,11 @@ La carpeta `sample_data/` contiene:
 | `empresa.csv` | 5 movimientos de octubre. Separador `;`, columnas `Cargo`/`Abono`, fechas `DD/MM/AAAA`. |
 | `banco_complemento.csv` / `empresa_complemento.csv` | 2 movimientos más por lado (intereses y comisión SPEI). Traen una columna extra (`Notas`) que se ignora. |
 | `banco_ambiguo.csv` / `empresa_ambiguo.csv` | Los mismos 2 movimientos anteriores, más 2 pagos de 50.00 que generan coincidencias ambiguas. |
+| `banco_manual.csv` / `empresa_manual.csv` | Un depósito de 100.00 en el banco contra dos cobros de 60.00 y 40.00 en la empresa (fechas fuera de la tolerancia): caso de conciliación manual de 1 a 2. |
 
 **Rango de fechas base: del 01/10/2026 al 31/10/2026**, en banco y en empresa.
+
+> Con el rango automático, `banco.csv` llega hasta el 02/11/2026 (incluye la fila fuera de rango). Para reproducir los escenarios 1 a 9, escribe 01/10–31/10 a mano; el sistema mostrará un aviso de que el rango no cubre todo el archivo principal del banco.
 
 | # | Archivos | Rangos (banco / empresa) | Resultado esperado |
 |---|---|---|---|
@@ -141,6 +168,9 @@ La carpeta `sample_data/` contiene:
 | 6 | Solo principales, con `?tol=0` | 01/10–31/10 / 01/10–31/10 | **3 conciliados**: FAC-002 (05/10 en banco, 04/10 en empresa) deja de emparejarse. |
 | 7 | Solo principales | 01/12–31/12 / 01/12–31/12 | **Error** «No hay movimientos interpretables» y aviso de que ninguna fila cae en el rango. |
 | 8 | Cualquiera | 31/10–01/10 | Error de validación: la fecha final no puede ser anterior a la inicial. |
+| 9 | Principales + `banco_manual.csv` y `empresa_manual.csv` | 01/10–31/10 / 01/10–31/10 | **4 conciliados**, 2 solo banco (comisión y depósito de 100.00) y 3 solo empresa (renta, 60.00 y 40.00). En *Conciliación manual*, marca el depósito y los dos cobros: la barra muestra diferencia 0.00 y se activa **Conciliar**. Resultado: **1 manual**, 1 solo banco, 1 solo empresa. La diferencia sigue en 5,850.00. |
+| 10 | Solo principales, **sin escribir fechas** | vacío / vacío | Las fechas se toman de cada archivo: banco 01/10/2026–02/11/2026 y empresa 01/10/2026–09/10/2026. Mensaje informativo de rango tomado del archivo. |
+| 11 | Principales + `*_ambiguo.csv` + `*_manual.csv`, y el depósito conciliado a mano (escenario 9) | 01/10–31/10 / 01/10–31/10 | **6 automáticos, 1 manual, 2 por revisar**, 1 solo banco y 1 solo empresa. Al exportar: Excel con 4 hojas, PDF de 3 páginas con 3 gráficas y balance **CUADRA**. |
 
 **Qué más verificar en la interfaz**
 - Los filtros de la tabla (Conciliados, Por revisar, Solo banco, Solo empresa) muestran el número de filas indicado en cada botón.
@@ -148,6 +178,10 @@ La carpeta `sample_data/` contiene:
 - La caja de **Avisos del análisis** se despliega y los avisos con detalle se expanden.
 - Quitar un complementario con la **×** del panel *Archivos cargados* actualiza el análisis.
 - Reabrir una conciliación desde el historial conserva las fechas elegidas.
+- Al elegir el archivo principal, las fechas se rellenan solas y aparece el rango detectado; con un archivo sin columna de fecha, avisa y pide escribirlas.
+- En *Conciliación manual*, al marcar un movimiento se resaltan los del otro lado con el mismo monto, y el botón **Conciliar** solo se activa con totales iguales.
+- **Deshacer** devuelve los movimientos a la lista; reemplazar un archivo principal deshace las manuales que lo usaban y lo avisa.
+- Los botones **Excel**, **PDF** y **CSV** descargan los archivos con el nombre `conciliacion_<n>_<fecha>`.
 
 ---
 
@@ -156,18 +190,19 @@ La carpeta `sample_data/` contiene:
 ```
 conciliacion_bancaria/
 ├── manage.py
-├── requirements.txt             # Dependencias con versión fija
+├── requirements.txt             # Dependencias con versión fija (Django, python-dotenv, openpyxl, reportlab)
 ├── .env.example                 # Plantilla de configuración (se sube a Git)
 ├── .env                         # Tu configuración real (NO se sube a Git)
 ├── config/                      # Configuración de Django (settings, urls)
 ├── conciliaciones/
-│   ├── models.py                # Conciliacion, ArchivoConciliacion
+│   ├── models.py                # Conciliacion, ArchivoConciliacion, Emparejamiento, EmparejamientoItem
 │   ├── forms.py                 # Formulario con archivos principal y complementarios
-│   ├── views.py                 # Inicio, nueva conciliación, detalle, eliminar archivo
-│   ├── services.py              # Lectura de CSV, emparejamiento y reporte
+│   ├── views.py                 # Inicio, nueva/detalle, archivos, conciliación manual, rango de fechas, exportación
+│   ├── services.py              # Lectura de CSV, emparejamiento, reporte y balance
+│   ├── exportacion.py           # Generación del Excel, el PDF y el CSV
 │   ├── urls.py
 │   ├── tests.py
-│   ├── migrations/
+│   ├── migrations/              # 0001 inicial · 0002 archivos múltiples · 0003 conciliaciones manuales
 │   └── templates/
 │       ├── registration/login.html
 │       └── conciliaciones/      # base, home, conciliacion y componentes (_*.html)
@@ -191,10 +226,13 @@ media/
 ## Limitaciones conocidas
 
 - Solo CSV (Excel, PDF, otros archivos e imágenes están pendientes).
-- Los movimientos no se guardan en la base de datos: se vuelven a leer de los archivos en cada consulta.
+- Los movimientos no se guardan en la base de datos: se vuelven a leer de los archivos en cada consulta. Las conciliaciones manuales se guardan por archivo y fila, por lo que reemplazar un archivo principal o quitar un complementario las deshace.
 - La tolerancia de fecha no se guarda; vuelve a 3 días al recargar la página.
-- Todavía no hay conciliación manual ni deshacer; los casos *Por revisar* solo se muestran.
-- El reporte no se puede exportar.
+- Falta **rechazar** sugerencias, una bitácora que registre también el deshacer y las notas de justificación en partidas pendientes.
+- Las filas repetidas entre archivos solo se **avisan**: siguen sumando en los totales.
+- No hay selector manual de columnas: se reconocen por el nombre del encabezado.
+- Los montos asumen punto decimal.
+- Rendimiento medido con 10,000 filas por lado (en un entorno de pruebas): abrir una conciliación tarda ≈ 1 s, el Excel ≈ 3 s y el PDF ≈ 1 s. El procesamiento es síncrono.
 - Pensado para desarrollo local con SQLite. Antes de publicarlo en un servidor: `DJANGO_DEBUG=False`, una `DJANGO_SECRET_KEY` nueva y `DJANGO_ALLOWED_HOSTS` con tu dominio, una base de datos de producción, HTTPS y un servidor de producción en lugar de `runserver`.
 
 ## Documentación relacionada
