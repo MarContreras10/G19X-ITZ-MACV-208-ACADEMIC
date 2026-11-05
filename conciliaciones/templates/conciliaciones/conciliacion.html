@@ -124,6 +124,12 @@
 
   /* Conciliación manual */
   .msg.warning{background:#fef3c7}
+  .msg.info{background:#dbeafe}
+  .rep-head{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+  .exportar{display:flex;align-items:center;gap:8px}
+  .rango-hint{font-size:12px;color:#4b5563;margin-top:4px}
+  .rango-hint.err{color:#92400e}
+  .rango-hint b{color:#111827}
   .st-manual{color:#6d28d9;background:#ede9fe;border-color:#c4b5fd}
   tr.fila-manual td.marca{--c:#7c3aed}
   form.inline{display:inline;margin:0}
@@ -162,7 +168,7 @@
   <!-- Barra lateral: rangos y archivos -->
   <div class="side">
     <aside class="card">
-      <form method="post" enctype="multipart/form-data">
+      <form method="post" enctype="multipart/form-data" data-url-rango="{% url 'rango_fechas' %}">
         {% csrf_token %}
         {{ form.non_field_errors }}
         <fieldset class="lado-banco">
@@ -171,7 +177,9 @@
             <div><label for="{{ form.banco_desde.id_for_label }}">Desde</label>{{ form.banco_desde }}{{ form.banco_desde.errors }}</div>
             <div><label for="{{ form.banco_hasta.id_for_label }}">Hasta</label>{{ form.banco_hasta }}{{ form.banco_hasta.errors }}</div>
           </div>
-          {% include "conciliaciones/_dropzone.html" with campo=form.banco_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" %}
+          <div class="rango-hint" id="hint-banco">{% if object and banco.rango_principal %}Archivo principal: <b>{{ banco.rango_principal.0|date:"d/m/Y" }} – {{ banco.rango_principal.1|date:"d/m/Y" }}</b>
+            <button type="button" class="link-btn" data-usar-rango="banco" data-desde="{{ banco.rango_principal.0|date:'Y-m-d' }}" data-hasta="{{ banco.rango_principal.1|date:'Y-m-d' }}">Usar este rango</button>{% elif not object %}Se rellenan solas al elegir el archivo principal.{% endif %}</div>
+          {% include "conciliaciones/_dropzone.html" with campo=form.banco_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" lado_rango="banco" %}
           {% include "conciliaciones/_dropzone.html" with campo=form.banco_complementarios titulo="Complementarios (opcional)" ayuda="Arrastra uno o varios archivos" %}
         </fieldset>
         <fieldset class="lado-empresa">
@@ -180,7 +188,9 @@
             <div><label for="{{ form.empresa_desde.id_for_label }}">Desde</label>{{ form.empresa_desde }}{{ form.empresa_desde.errors }}</div>
             <div><label for="{{ form.empresa_hasta.id_for_label }}">Hasta</label>{{ form.empresa_hasta }}{{ form.empresa_hasta.errors }}</div>
           </div>
-          {% include "conciliaciones/_dropzone.html" with campo=form.empresa_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" %}
+          <div class="rango-hint" id="hint-empresa">{% if object and empresa.rango_principal %}Archivo principal: <b>{{ empresa.rango_principal.0|date:"d/m/Y" }} – {{ empresa.rango_principal.1|date:"d/m/Y" }}</b>
+            <button type="button" class="link-btn" data-usar-rango="empresa" data-desde="{{ empresa.rango_principal.0|date:'Y-m-d' }}" data-hasta="{{ empresa.rango_principal.1|date:'Y-m-d' }}">Usar este rango</button>{% elif not object %}Se rellenan solas al elegir el archivo principal.{% endif %}</div>
+          {% include "conciliaciones/_dropzone.html" with campo=form.empresa_principal titulo="Archivo principal" ayuda="Arrastra el archivo o haz clic" lado_rango="empresa" %}
           {% include "conciliaciones/_dropzone.html" with campo=form.empresa_complementarios titulo="Complementarios (opcional)" ayuda="Arrastra uno o varios archivos" %}
         </fieldset>
         {% if object %}<p class="muted" style="font-size:12px;margin:0 0 8px">Subir otro archivo principal reemplaza al actual.</p>{% endif %}
@@ -215,7 +225,17 @@
     {% if object %}{% include "conciliaciones/_coincidencias.html" %}{% include "conciliaciones/_manual.html" %}{% endif %}
 
     <div class="card" id="reporte">
-      <h3>Reporte</h3>
+      <div class="rep-head">
+        <h3 style="margin:0">Reporte</h3>
+        {% if object %}
+        <div class="exportar">
+          <span class="muted">Descargar:</span>
+          <a class="btn sm" href="{% url 'exportar' object.pk 'xlsx' %}?tol={{ tolerancia }}" title="Resumen, balance/match, pendientes y avisos">Excel</a>
+          <a class="btn sm" href="{% url 'exportar' object.pk 'pdf' %}?tol={{ tolerancia }}" title="Resumen con gráficas y observaciones">PDF</a>
+          <a class="btn sm sec" href="{% url 'exportar' object.pk 'csv' %}?tol={{ tolerancia }}" title="Solo la tabla de balance/match">CSV</a>
+        </div>
+        {% endif %}
+      </div>
       {% if object %}
         {% include "conciliaciones/_reporte.html" %}
       {% else %}
@@ -240,6 +260,7 @@ document.querySelectorAll('.dz').forEach(function (dz) {
     archivos.forEach(function (f) { dt.items.add(f); });
     input.files = dt.files;
     lista.innerHTML = '';
+    dz.dispatchEvent(new CustomEvent('archivos', {detail: archivos.slice()}));
     archivos.forEach(function (f, i) {
       var li = document.createElement('li');
       var n = document.createElement('span'); n.className = 'dz-name'; n.textContent = f.name;
@@ -277,6 +298,60 @@ document.querySelectorAll('.dz').forEach(function (dz) {
   });
   dz.addEventListener('drop', function (e) { agregar(e.dataTransfer.files); });
 });
+
+/* Rango de fechas: se propone a partir del archivo principal */
+(function () {
+  var form = document.querySelector('form[data-url-rango]');
+  if (!form) return;
+  var url = form.dataset.urlRango;
+  var token = form.querySelector('[name=csrfmiddlewaretoken]').value;
+  function dmy(iso) { var p = iso.split('-'); return p[2] + '/' + p[1] + '/' + p[0]; }
+  function poner(lado, desde, hasta) {
+    document.getElementById('id_' + lado + '_desde').value = desde;
+    document.getElementById('id_' + lado + '_hasta').value = hasta;
+  }
+
+  // Botón «Usar este rango» (conciliación ya creada)
+  form.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-usar-rango]');
+    if (b) poner(b.dataset.usarRango, b.dataset.desde, b.dataset.hasta);
+  });
+
+  // Al elegir el archivo principal, se lee su rango en el servidor y se rellenan las fechas
+  document.querySelectorAll('.dz[data-rango]').forEach(function (dz) {
+    var lado = dz.dataset.rango, hint = document.getElementById('hint-' + lado), ultima = 0;
+    dz.addEventListener('archivos', function (e) {
+      var archivos = e.detail, consulta = ++ultima;
+      hint.className = 'rango-hint';
+      if (!archivos.length) { hint.textContent = ''; return; }
+      hint.textContent = 'Leyendo las fechas del archivo…';
+      var datos = new FormData();
+      datos.append('archivo', archivos[0]);
+      datos.append('csrfmiddlewaretoken', token);
+      fetch(url, {method: 'POST', body: datos, credentials: 'same-origin'})
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          if (consulta !== ultima) return;            // llegó tarde: ya se eligió otro archivo
+          hint.textContent = '';
+          if (!j.ok) {
+            hint.className = 'rango-hint err';
+            hint.textContent = j.mensaje + ' Indica las fechas manualmente.';
+            return;
+          }
+          poner(lado, j.desde, j.hasta);
+          var b = document.createElement('b');
+          b.textContent = dmy(j.desde) + ' – ' + dmy(j.hasta);
+          hint.append('Rango tomado del archivo (' + j.filas + ' filas): ', b);
+          if (j.invalidas) hint.append(' · ' + j.invalidas + ' fila(s) con fecha no válida.');
+        })
+        .catch(function () {
+          if (consulta !== ultima) return;
+          hint.className = 'rango-hint err';
+          hint.textContent = 'No se pudo leer el archivo. Indica las fechas manualmente.';
+        });
+    });
+  });
+})();
 
 /* Conciliación manual: sumas de lo seleccionado, resaltado por monto y búsqueda */
 (function () {

@@ -3,12 +3,14 @@ from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.db import IntegrityError, transaction
+from django.http import Http404, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse, reverse_lazy
+from django.utils import timezone
 from django.views import View
 from django.views.generic import CreateView, ListView, UpdateView
 
-from . import services
+from . import exportacion, services
 from .forms import ConciliacionForm
 from .models import ArchivoConciliacion, Conciliacion, Emparejamiento, EmparejamientoItem
 
@@ -56,6 +58,13 @@ def _emparejar(obj, banco, empresa, tolerancia):
     return services.emparejar(banco["movimientos"], empresa["movimientos"], tolerancia, _grupos_manuales(obj))
 
 
+def _avisar_rangos_automaticos(request, form):
+    rangos = getattr(form, "rangos_automaticos", [])
+    if rangos:
+        detalle = "; ".join(f"{et}: {d:%d/%m/%Y} – {h:%d/%m/%Y}" for et, d, h in rangos)
+        messages.info(request, f"Rango de fechas tomado del archivo principal. {detalle}.")
+
+
 def _avisar_manuales_eliminados(request, form):
     n = getattr(form, "manuales_eliminados", 0)
     if n:
@@ -99,6 +108,7 @@ class Nueva(LoginRequiredMixin, VistaPreviaMixin, CreateView):
         form.instance.usuario = self.request.user
         messages.success(self.request, "Archivos cargados correctamente.")
         respuesta = super().form_valid(form)
+        _avisar_rangos_automaticos(self.request, form)
         _avisar_manuales_eliminados(self.request, form)
         return respuesta
 
@@ -107,6 +117,7 @@ class Detalle(MisConciliaciones, VistaPreviaMixin, UpdateView):
     def form_valid(self, form):
         messages.success(self.request, "Vista previa actualizada.")
         respuesta = super().form_valid(form)
+        _avisar_rangos_automaticos(self.request, form)
         _avisar_manuales_eliminados(self.request, form)
         return respuesta
 
@@ -190,3 +201,51 @@ class DeshacerManual(LoginRequiredMixin, View):
         emparejamiento.delete()
         messages.success(request, "Conciliación deshecha: los movimientos vuelven a estar disponibles.")
         return redirect(_destino(conciliacion_pk, _tolerancia_valida(request.POST.get("tol")), request.POST.get("ancla")))
+
+
+class RangoFechasArchivo(LoginRequiredMixin, View):
+    """Lee las fechas de un CSV y devuelve su rango (el formulario lo usa para rellenar los campos)."""
+    def post(self, request):
+        archivo = request.FILES.get("archivo")
+        if not archivo:
+            return JsonResponse({"ok": False, "mensaje": "No se recibió ningún archivo."}, status=400)
+        if not archivo.name.lower().endswith(".csv"):
+            return JsonResponse({"ok": False, "mensaje": "Solo se aceptan archivos .csv."}, status=400)
+        try:
+            r = services.rango_fechas(services.ArchivoEnMemoria(archivo.read()))
+        except services.ErrorArchivo as e:
+            return JsonResponse({"ok": False, "mensaje": str(e)})
+        return JsonResponse({"ok": True, "desde": r["desde"].isoformat(), "hasta": r["hasta"].isoformat(),
+                             "filas": r["filas"], "invalidas": r["invalidas"], "columna": r["columna"]})
+
+
+FORMATOS_EXPORTACION = {  # formato: (función generadora, tipo de contenido, sufijo del nombre)
+    "xlsx": (exportacion.generar_xlsx, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ""),
+    "pdf": (exportacion.generar_pdf, "application/pdf", ""),
+    "csv": (exportacion.generar_csv, "text/csv; charset=utf-8", "_balance_match"),
+}
+
+
+class ExportarReporte(LoginRequiredMixin, View):
+    """Descarga el reporte de la conciliación en Excel, PDF o CSV (tabla de balance/match)."""
+
+    def get(self, request, pk, formato):
+        obj = get_object_or_404(Conciliacion, pk=pk, usuario=request.user)
+        if formato not in FORMATOS_EXPORTACION:
+            raise Http404("Formato no disponible")
+        tolerancia = _tolerancia_valida(request.GET.get("tol"))
+        archivos_banco, archivos_empresa, banco, empresa = _analizar(obj)
+        coincidencias = _emparejar(obj, banco, empresa, tolerancia)
+        generado = timezone.localtime()
+        datos = {
+            "conciliacion": obj, "usuario": request.user.get_username(), "generado": generado, "tolerancia": tolerancia,
+            "archivos": {"BANCO": [(a.nombre, a.principal) for a in archivos_banco],
+                         "EMPRESA": [(a.nombre, a.principal) for a in archivos_empresa]},
+            "banco": banco, "empresa": empresa, "coincidencias": coincidencias,
+            "reporte": services.reporte(banco, empresa, coincidencias, obj),
+            "balance": services.balance(banco, empresa, coincidencias),
+        }
+        generar, tipo, sufijo = FORMATOS_EXPORTACION[formato]
+        respuesta = HttpResponse(generar(datos), content_type=tipo)
+        respuesta["Content-Disposition"] = f'attachment; filename="conciliacion_{obj.pk}_{generado:%Y%m%d}{sufijo}.{formato}"'
+        return respuesta

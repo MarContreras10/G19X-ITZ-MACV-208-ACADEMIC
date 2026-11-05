@@ -9,7 +9,9 @@ urlpatterns = [
     path("", views.Inicio.as_view(), name="home"),
     path("conciliacion/nueva/", views.Nueva.as_view(), name="nueva"),
     path("conciliacion/<int:pk>/", views.Detalle.as_view(), name="conciliacion"),
+    path("api/rango-fechas/", views.RangoFechasArchivo.as_view(), name="rango_fechas"),
     path("archivos/<int:pk>/eliminar/", views.EliminarArchivo.as_view(), name="eliminar_archivo"),
+    path("conciliacion/<int:pk>/exportar/<slug:formato>/", views.ExportarReporte.as_view(), name="exportar"),
     path("conciliacion/<int:pk>/manual/", views.ConciliarManual.as_view(), name="conciliar_manual"),
     path("emparejamientos/<int:pk>/deshacer/", views.DeshacerManual.as_view(), name="deshacer_manual"),
 ]

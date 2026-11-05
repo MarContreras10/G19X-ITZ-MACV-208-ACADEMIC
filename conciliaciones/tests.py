@@ -335,3 +335,254 @@ class ConciliacionManualVistasTests(TestCase):
         self.assertEqual((r["resumen"]["manuales"], r["resumen"]["manuales_huerfanas"]), (0, 1))
         self.assertEqual(Emparejamiento.objects.count(), 1)                 # sigue guardada
         self.assertIn("No aplicada", resp.content.decode())
+
+
+class RangoFechasTests(SimpleTestCase):
+    def test_rango_de_un_csv_con_formato_dia_mes_ano(self):
+        csv = "Fecha;Concepto;Cargo;Abono\n15/10/2026;A;;5\n03/10/2026;B;2;\n28/10/2026;C;;1\n"
+        r = services.rango_fechas(_Archivo(csv))
+        self.assertEqual((r["desde"], r["hasta"], r["filas"], r["invalidas"]), (date(2026, 10, 3), date(2026, 10, 28), 3, 0))
+
+    def test_cuenta_las_fechas_invalidas_sin_fallar(self):
+        r = services.rango_fechas(_Archivo("Fecha,Monto\n2026-10-01,1\nmala,2\n2026-10-09,3\n"))
+        self.assertEqual((r["desde"], r["hasta"], r["invalidas"]), (date(2026, 10, 1), date(2026, 10, 9), 1))
+
+    def test_errores_claros(self):
+        with self.assertRaisesMessage(services.ErrorArchivo, "columna de fecha"):
+            services.rango_fechas(_Archivo("Texto,Monto\nhola,1\n"))
+        with self.assertRaisesMessage(services.ErrorArchivo, "ninguna fecha"):
+            services.rango_fechas(_Archivo("Fecha,Monto\nmala,1\notra,2\n"))
+        with self.assertRaisesMessage(services.ErrorArchivo, "vacío"):
+            services.rango_fechas(_Archivo("   "))
+
+    def test_el_rango_del_principal_no_depende_del_rango_elegido_ni_incluye_complementarios(self):
+        principal = archivo("b.csv", "Fecha,Monto\n2026-10-05,1\n2026-10-20,2\n")
+        comp = archivo("c.csv", "Fecha,Monto\n2026-09-01,3\n2026-12-31,4\n")
+        b = services.analizar([principal, comp], date(2026, 10, 10), date(2026, 10, 12), "BANCO")
+        self.assertEqual(b["rango_principal"], (date(2026, 10, 5), date(2026, 10, 20)))
+
+    def test_aviso_cuando_el_rango_elegido_no_cubre_el_principal(self):
+        b = services.analizar([archivo("b.csv", "Fecha,Monto\n2026-10-01,1\n2026-10-30,2\n")], date(2026, 10, 5), date(2026, 10, 31), "BANCO")
+        e = services.analizar([archivo("e.csv", "Fecha,Monto\n2026-10-01,1\n2026-10-30,2\n")], *RANGO, "EMPRESA")
+        conc = SimpleNamespace(banco_desde=date(2026, 10, 5), banco_hasta=date(2026, 10, 31),
+                               empresa_desde=RANGO[0], empresa_hasta=RANGO[1])
+        r = services.reporte(b, e, services.emparejar(b["movimientos"], e["movimientos"]), conc)
+        avisos = [a for a in r["alertas"] if "no cubre todo el archivo principal" in a["titulo"]]
+        self.assertEqual([a["origen"] for a in avisos], ["Banco"])      # la empresa sí cubre todo
+        self.assertIn("01/10/2026 – 30/10/2026", avisos[0]["detalle"])
+
+
+class BalanceTests(SimpleTestCase):
+    def _balance(self, banco_csv, empresa_csv, manuales=()):
+        b = services.analizar([archivo("b.csv", banco_csv, pk=1)], *RANGO, "BANCO")
+        e = services.analizar([archivo("e.csv", empresa_csv, pk=2)], *RANGO, "EMPRESA")
+        c = services.emparejar(b["movimientos"], e["movimientos"], manuales=manuales)
+        return services.balance(b, e, c), c
+
+    def test_la_diferencia_se_explica_con_lo_que_no_se_concilio(self):
+        bal, _ = self._balance("Fecha,Monto\n2026-10-01,100\n2026-10-02,-150\n", "Fecha,Monto\n2026-10-01,100\n2026-10-09,-6000\n")
+        self.assertEqual((bal["neto_banco"], bal["neto_empresa"]), (D("-50"), D("-5900")))
+        self.assertEqual((bal["sin_conciliar_banco"], bal["sin_conciliar_empresa"]), (D("-150"), D("-6000")))
+        self.assertEqual(bal["neto_ajustado"], D("-5900"))
+        self.assertTrue(bal["cuadra"] and bal["completo"])
+        self.assertEqual(bal["sin_explicar"], 0)
+
+    def test_tambien_cuadra_con_conciliaciones_manuales(self):
+        banco = "Fecha,Monto\n2026-10-01,100\n"
+        empresa = "Fecha,Monto\n2026-10-20,60\n2026-10-21,40\n"
+        bal, c = self._balance(banco, empresa, manuales=[grupo(1, "1:2", "2:2", "2:3")])
+        self.assertEqual(c["resumen"]["manuales"], 1)
+        self.assertTrue(bal["cuadra"])
+        self.assertEqual((bal["n_banco"], bal["n_empresa"]), (0, 0))
+
+    def test_sin_totales_no_hay_balance(self):
+        b = services.analizar([archivo("b.csv", "Fecha,Texto\n2026-10-01,x\n")], *RANGO, "BANCO")
+        e = services.analizar([archivo("e.csv", "Fecha,Monto\n2026-10-01,1\n")], *RANGO, "EMPRESA")
+        self.assertIsNone(services.balance(b, e, services.emparejar(b["movimientos"], e["movimientos"])))
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class RangoFechasVistasTests(TestCase):
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        from django.conf import settings
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def setUp(self):
+        self.ana = User.objects.create_user("ana")
+        self.client.force_login(self.ana)
+
+    def nueva(self, **extra):
+        return self.client.post("/conciliacion/nueva/", {
+            "banco_principal": SimpleUploadedFile("banco.csv", CSV_BANCO.encode()),
+            "empresa_principal": SimpleUploadedFile("empresa.csv", CSV_EMPRESA.encode()), **extra}, follow=True)
+
+    def test_endpoint_devuelve_el_rango(self):
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.csv", CSV_BANCO.encode())})
+        self.assertEqual(r.json(), {"ok": True, "desde": "2026-10-01", "hasta": "2026-10-05", "filas": 3, "invalidas": 0, "columna": "Fecha"})
+
+    def test_endpoint_errores(self):
+        self.assertEqual(self.client.post("/api/rango-fechas/").status_code, 400)
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.xlsx", b"x")})
+        self.assertEqual(r.status_code, 400)
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.csv", b"Texto\nhola\n")})
+        self.assertEqual((r.status_code, r.json()["ok"]), (200, False))
+        self.assertEqual(self.client.get("/api/rango-fechas/").status_code, 405)
+
+    def test_endpoint_exige_sesion(self):
+        self.client.logout()
+        self.assertEqual(self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.csv", b"x")}).status_code, 302)
+
+    def test_sin_fechas_se_toman_del_archivo_principal(self):
+        resp = self.nueva()
+        c = Conciliacion.objects.get()
+        self.assertEqual((c.banco_desde, c.banco_hasta), (date(2026, 10, 1), date(2026, 10, 5)))
+        self.assertEqual((c.empresa_desde, c.empresa_hasta), (date(2026, 10, 5), date(2026, 10, 22)))
+        self.assertTrue(any("Rango de fechas tomado del archivo principal" in str(m) for m in resp.context["messages"]))
+
+    def test_el_archivo_se_guarda_completo_despues_de_leerlo_para_el_rango(self):
+        self.nueva()
+        guardado = Conciliacion.objects.get().archivos.get(lado="BANCO", principal=True)
+        with guardado.archivo.open("rb") as f:
+            self.assertEqual(f.read().decode(), CSV_BANCO)
+
+    def test_si_se_da_una_sola_fecha_se_completa_la_otra(self):
+        self.nueva(banco_desde="2026-10-03")
+        c = Conciliacion.objects.get()
+        self.assertEqual((c.banco_desde, c.banco_hasta), (date(2026, 10, 3), date(2026, 10, 5)))
+
+    def test_las_fechas_escritas_a_mano_tienen_prioridad(self):
+        resp = self.nueva(**FECHAS)
+        c = Conciliacion.objects.get()
+        self.assertEqual((c.banco_desde, c.banco_hasta), (date(2026, 10, 1), date(2026, 10, 31)))
+        self.assertFalse(any("tomado del archivo" in str(m) for m in resp.context["messages"]))
+
+    def test_archivo_sin_columna_de_fecha_pide_las_fechas(self):
+        resp = self.client.post("/conciliacion/nueva/", {
+            "banco_principal": SimpleUploadedFile("banco.csv", b"Texto,Monto\nx,1\n"),
+            "empresa_principal": SimpleUploadedFile("empresa.csv", CSV_EMPRESA.encode())})
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("No se pudo tomar la fecha del archivo principal", resp.content.decode())
+        self.assertEqual(Conciliacion.objects.count(), 0)
+
+    def test_al_editar_con_fechas_vacias_se_usa_el_principal_guardado(self):
+        self.nueva(**FECHAS)
+        c = Conciliacion.objects.get()
+        self.client.post(f"/conciliacion/{c.pk}/", {"banco_desde": "", "banco_hasta": "",
+                                                    "empresa_desde": "2026-10-01", "empresa_hasta": "2026-10-31"})
+        c.refresh_from_db()
+        self.assertEqual((c.banco_desde, c.banco_hasta), (date(2026, 10, 1), date(2026, 10, 5)))
+
+    def test_la_pagina_ofrece_usar_el_rango_del_principal(self):
+        self.nueva(**FECHAS)
+        c = Conciliacion.objects.get()
+        html = self.client.get(f"/conciliacion/{c.pk}/").content.decode()
+        self.assertIn('data-usar-rango="banco" data-desde="2026-10-01" data-hasta="2026-10-05"', html)
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class ExportacionTests(TestCase):
+    """Descarga del reporte en Excel, PDF y CSV."""
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        from django.conf import settings
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def setUp(self):
+        self.ana = User.objects.create_user("ana")
+        self.client.force_login(self.ana)
+        self.c = self.crear(CSV_BANCO, CSV_EMPRESA)
+
+    def crear(self, banco, empresa, **fechas):
+        self.client.post("/conciliacion/nueva/", {
+            **(fechas or FECHAS),
+            "banco_principal": SimpleUploadedFile("banco.csv", banco.encode()),
+            "empresa_principal": SimpleUploadedFile("empresa.csv", empresa.encode())})
+        return Conciliacion.objects.latest("id")
+
+    def descargar(self, formato, c=None, query="?tol=3"):
+        return self.client.get(f"/conciliacion/{(c or self.c).pk}/exportar/{formato}/{query}")
+
+    def test_excel_tiene_las_hojas_y_la_tabla_de_balance_match(self):
+        from io import BytesIO
+        from openpyxl import load_workbook
+        r = self.descargar("xlsx")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("spreadsheetml", r["Content-Type"])
+        self.assertRegex(r["Content-Disposition"], r'attachment; filename="conciliacion_\d+_\d{8}\.xlsx"')
+        wb = load_workbook(BytesIO(r.content))
+        self.assertEqual(wb.sheetnames, ["Resumen", "Balance-Match", "Pendientes", "Avisos"])
+        hoja = wb["Balance-Match"]
+        encabezados = [c.value for c in hoja[1]]
+        self.assertEqual(encabezados[:2], ["#", "Estado"])
+        estados = [hoja.cell(row=i, column=2).value for i in range(2, 2 + 6)]
+        self.assertIn("Conciliado", estados)
+        self.assertIn("Solo banco", estados)
+
+    def test_la_diferencia_total_del_excel_coincide_con_la_del_reporte(self):
+        from io import BytesIO
+        from openpyxl import load_workbook
+        wb = load_workbook(BytesIO(self.descargar("xlsx").content))
+        hoja = wb["Balance-Match"]
+        columnas = [c.value for c in hoja[1]]
+        col = columnas.index("Diferencia (banco - empresa)") + 1
+        fila_totales = next(i for i in range(2, hoja.max_row + 1) if hoja.cell(row=i, column=1).value == "Totales")
+        total = Decimal(str(hoja.cell(row=fila_totales, column=col).value))
+        resp = self.client.get(f"/conciliacion/{self.c.pk}/?tol=3")
+        self.assertEqual(total, resp.context["reporte"]["diferencia"])
+
+    def test_csv_balance_match(self):
+        r = self.descargar("csv")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.content.startswith(b"\xef\xbb\xbf"))           # BOM para Excel
+        self.assertRegex(r["Content-Disposition"], r"_balance_match\.csv")
+        lineas = r.content.decode("utf-8-sig").strip().splitlines()
+        self.assertTrue(lineas[0].startswith("#,Estado,Regla"))
+        resp = self.client.get(f"/conciliacion/{self.c.pk}/?tol=3")
+        self.assertEqual(len(lineas) - 1, resp.context["coincidencias"]["total_filas"])
+
+    def test_pdf_valido_con_secciones_esperadas(self):
+        r = self.descargar("pdf")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r["Content-Type"], "application/pdf")
+        self.assertTrue(r.content.startswith(b"%PDF-") and r.content.rstrip().endswith(b"%%EOF"))
+
+    def test_la_tolerancia_de_la_url_cambia_el_resultado_exportado(self):
+        def estados(query):
+            lineas = self.descargar("csv", query=query).content.decode("utf-8-sig").strip().splitlines()[1:]
+            return [l.split(",")[1] for l in lineas]
+        # El 7.00 (mismo día) se concilia siempre; el 30.00 está a 20 días, así que solo entra con tol=30.
+        # Los 100.00 no tienen pareja directa (hay 60.00 + 40.00), por eso quedan fuera en ambos casos.
+        self.assertEqual(estados("?tol=30").count("Conciliado"), 2)
+        self.assertEqual(estados("?tol=3").count("Conciliado"), 1)
+
+    def test_las_horas_de_conciliaciones_manuales_salen_en_hora_local(self):
+        from django.utils import timezone
+        ab, ae = self.c.archivos.get(lado="BANCO"), self.c.archivos.get(lado="EMPRESA")
+        self.client.post(f"/conciliacion/{self.c.pk}/manual/", {"banco": [f"{ab.pk}:3"], "empresa": [f"{ae.pk}:4"], "tol": "3"})
+        creado = Emparejamiento.objects.get().creado
+        esperado = timezone.localtime(creado).strftime("%d/%m/%Y %H:%M")
+        texto = self.descargar("csv").content.decode("utf-8-sig")
+        self.assertIn(esperado, texto)
+
+    def test_exporta_aunque_no_haya_movimientos_en_el_rango(self):
+        c = self.crear(CSV_BANCO, CSV_EMPRESA, banco_desde="2027-01-01", banco_hasta="2027-01-31",
+                       empresa_desde="2027-01-01", empresa_hasta="2027-01-31")
+        for formato in ("xlsx", "pdf", "csv"):
+            self.assertEqual(self.descargar(formato, c).status_code, 200, formato)
+
+    def test_exporta_sin_columna_de_monto(self):
+        c = self.crear("Fecha,Texto\n2026-10-01,a\n", "Fecha,Texto\n2026-10-01,b\n")
+        for formato in ("xlsx", "pdf", "csv"):
+            self.assertEqual(self.descargar(formato, c).status_code, 200, formato)
+
+    def test_formato_inexistente_y_permisos(self):
+        self.assertEqual(self.descargar("docx").status_code, 404)
+        otro = User.objects.create_user("otro")
+        self.client.force_login(otro)
+        self.assertEqual(self.descargar("pdf").status_code, 404)           # no es su conciliación
+        self.client.logout()
+        self.assertEqual(self.descargar("pdf").status_code, 302)           # exige iniciar sesión

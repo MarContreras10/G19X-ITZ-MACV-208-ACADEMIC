@@ -1,6 +1,7 @@
 from django import forms
 from django.db import transaction
 
+from . import services
 from .models import ArchivoConciliacion, Conciliacion, Emparejamiento
 
 Lado = ArchivoConciliacion.Lado
@@ -47,6 +48,9 @@ class ConciliacionForm(forms.ModelForm):
         if self.instance.pk:  # al editar, el principal ya existe: reemplazarlo es opcional
             self.fields["banco_principal"].required = False
             self.fields["empresa_principal"].required = False
+        # Las fechas son opcionales: si faltan se toman del archivo principal (ver clean)
+        for campo in ("banco_desde", "banco_hasta", "empresa_desde", "empresa_hasta"):
+            self.fields[campo].required = False
 
     # --- validación: solo .csv ---
     def _solo_csv(self, campo):
@@ -69,8 +73,46 @@ class ConciliacionForm(forms.ModelForm):
     def clean_empresa_complementarios(self):
         return self._solo_csv("empresa_complementarios")
 
+    def _rango_del_principal(self, prefijo, lado):
+        """Rango de fechas del archivo principal de un lado (el recién subido o el ya guardado)."""
+        subido = self.cleaned_data.get(f"{prefijo}_principal")
+        if subido:
+            subido.seek(0)
+            datos = subido.read()
+            subido.seek(0)   # se deja listo para guardarlo después
+            return services.rango_fechas(services.ArchivoEnMemoria(datos))
+        if self.instance.pk:
+            guardado = self.instance.archivos.filter(lado=lado, principal=True).first()
+            if guardado:
+                return services.rango_fechas(guardado.archivo)
+        return None
+
+    def _completar_fechas(self, datos):
+        """Si falta alguna fecha de un lado, la toma del archivo principal."""
+        self.rangos_automaticos = []   # [(etiqueta, desde, hasta)] para avisar al usuario
+        for prefijo, lado, etiqueta in (("banco", Lado.BANCO, "Banco"), ("empresa", Lado.EMPRESA, "Empresa")):
+            faltan = [c for c in (f"{prefijo}_desde", f"{prefijo}_hasta") if not datos.get(c)]
+            if not faltan or self.errors.get(f"{prefijo}_principal"):
+                continue
+            try:
+                rango = self._rango_del_principal(prefijo, lado)
+            except services.ErrorArchivo as e:
+                for c in faltan:
+                    self.add_error(c, f"No se pudo tomar la fecha del archivo principal: {e}")
+                continue
+            if rango is None:
+                for c in faltan:
+                    self.add_error(c, "Indica la fecha o carga el archivo principal para tomarla de ahí.")
+                continue
+            if f"{prefijo}_desde" in faltan:
+                datos[f"{prefijo}_desde"] = rango["desde"]
+            if f"{prefijo}_hasta" in faltan:
+                datos[f"{prefijo}_hasta"] = rango["hasta"]
+            self.rangos_automaticos.append((etiqueta, datos[f"{prefijo}_desde"], datos[f"{prefijo}_hasta"]))
+
     def clean(self):
         datos = super().clean()
+        self._completar_fechas(datos)
         for lado in ("banco", "empresa"):
             desde, hasta = datos.get(f"{lado}_desde"), datos.get(f"{lado}_hasta")
             if desde and hasta and desde > hasta:

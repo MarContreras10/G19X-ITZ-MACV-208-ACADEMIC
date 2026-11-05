@@ -12,6 +12,7 @@ TOLERANCIA_DIAS = 3
 NIVELES = ("error", "advertencia", "sugerencia", "info")
 ETIQUETAS_LADO = {"BANCO": "Banco", "EMPRESA": "Empresa"}
 CERO = Decimal("0.00")
+CLAVES_FECHA = ("fecha", "date")
 
 
 class ErrorArchivo(Exception):
@@ -108,6 +109,42 @@ def leer_tabla(archivo):
     return columnas, cuerpo, numeros
 
 
+class ArchivoEnMemoria:
+    """Envuelve bytes con la interfaz mínima (open/read/close) que usa `leer_tabla`.
+
+    Sirve para leer un archivo subido sin cerrarlo: así se puede guardar después.
+    """
+    def __init__(self, datos):
+        self._datos = datos
+
+    def open(self, modo="rb"):
+        pass
+
+    def read(self):
+        return self._datos
+
+    def close(self):
+        pass
+
+
+def rango_fechas(archivo):
+    """Fecha más antigua y más reciente de un CSV (para proponer el rango de la conciliación).
+
+    Devuelve {"desde", "hasta", "filas", "invalidas", "columna"}. Levanta
+    ErrorArchivo si el archivo no se puede leer, no tiene columna de fecha o
+    ninguna fecha se puede interpretar.
+    """
+    columnas, filas, _ = leer_tabla(archivo)
+    i_fecha = _buscar(columnas, CLAVES_FECHA)
+    if i_fecha is None:
+        raise ErrorArchivo("No se encontró una columna de fecha (se busca un encabezado como «Fecha»).")
+    fechas = [f for f in (_fecha(fila[i_fecha]) for fila in filas) if f]
+    if not fechas:
+        raise ErrorArchivo(f"No se pudo interpretar ninguna fecha de la columna «{columnas[i_fecha]}».")
+    return {"desde": min(fechas), "hasta": max(fechas), "filas": len(filas),
+            "invalidas": len(filas) - len(fechas), "columna": columnas[i_fecha]}
+
+
 # ------------------------------------------------------------------ análisis
 def analizar(archivos, desde, hasta, lado="BANCO"):
     """Lee el archivo principal y los complementarios de un lado.
@@ -125,7 +162,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
     origen = ETIQUETAS_LADO.get(lado, lado)
     res = {"error": None, "lado": lado, "origen": origen, "columnas": [], "filas": [],
            "total": 0, "mostradas": 0, "comparados": [], "avisos": [], "stats": None,
-           "movimientos": [], "sin_interpretar": 0}
+           "movimientos": [], "sin_interpretar": 0, "rango_principal": None}
 
     def avisar(nivel, titulo, detalle=""):
         res["avisos"].append(_aviso(nivel, titulo, detalle, origen))
@@ -141,7 +178,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
         res["error"] = f"{principal.nombre}: {e}"
         return res
 
-    i_fecha = _buscar(columnas, ("fecha", "date"))
+    i_fecha = _buscar(columnas, CLAVES_FECHA)
     i_monto = _buscar(columnas, ("monto", "importe", "amount"))
     i_abono = _buscar(columnas, ("abono", "deposito", "credito"))
     i_cargo = _buscar(columnas, ("cargo", "retiro", "debito"))
@@ -210,6 +247,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
                "Revisa que solo aporte información nueva.")
 
     visibles, problemas = [], []
+    fechas_principal = []
     ingresos = egresos = CERO
     movimientos = 0
     for nombre, es_principal, numero, fila, archivo_pk in registros:
@@ -219,6 +257,8 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
             if fecha is None:
                 problemas.append(f"{nombre}, fila {numero}: fecha inválida «{fila[i_fecha]}»")
                 continue
+            if es_principal:
+                fechas_principal.append(fecha)
             if not (desde <= fecha <= hasta):
                 continue
         visibles.append({"archivo": nombre, "principal": es_principal, "celdas": fila})
@@ -253,6 +293,8 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
         avisar("advertencia", "Ninguna fila cae dentro del rango de fechas",
                f"Rango elegido: {_fmt_fecha(desde)} – {_fmt_fecha(hasta)}. Revisa las fechas del archivo y del rango.")
 
+    if fechas_principal:
+        res["rango_principal"] = (min(fechas_principal), max(fechas_principal))
     res["sin_interpretar"] = len(problemas)
     res["columnas"] = columnas
     res["comparados"] = comparados
@@ -404,7 +446,7 @@ def emparejar(banco, empresa, tolerancia=TOLERANCIA_DIAS, manuales=()):
     }
 
     orden = lambda m: (m["fecha"], m["id"])
-    return {"filas": filas[:MAX_FILAS_VISTA], "total_filas": len(filas), "resumen": resumen,
+    return {"filas": filas[:MAX_FILAS_VISTA], "filas_todas": filas, "total_filas": len(filas), "resumen": resumen,
             "conciliados": conciliados, "sugeridos": sugeridos,
             "pend_banco": pend_banco, "pend_empresa": pend_empresa,
             "manuales": aplicadas, "manuales_huerfanas": huerfanas,
@@ -456,6 +498,17 @@ def reporte(banco, empresa, coincidencias, conciliacion=None):
             "info", f"{rs['manuales']} conciliación(es) manual(es)",
             "Fueron hechas por una persona y se pueden deshacer desde la sección de conciliación manual."))
 
+    if conciliacion is not None:
+        for lado, d, h in ((banco, conciliacion.banco_desde, conciliacion.banco_hasta),
+                           (empresa, conciliacion.empresa_desde, conciliacion.empresa_hasta)):
+            rp = lado.get("rango_principal")
+            if rp and (d > rp[0] or h < rp[1]):
+                alertas.append(_aviso(
+                    "sugerencia", "El rango elegido no cubre todo el archivo principal",
+                    f"El archivo principal abarca {_fmt_fecha(rp[0])} – {_fmt_fecha(rp[1])}, pero el rango elegido es "
+                    f"{_fmt_fecha(d)} – {_fmt_fecha(h)}. Los movimientos fuera del rango no se comparan. "
+                    "Usa «Usar este rango» en la barra lateral si quieres incluirlos todos.", lado["origen"]))
+
     hay_b, hay_e = rs["total_banco"], rs["total_empresa"]
     if not hay_b and not hay_e and not banco["error"] and not empresa["error"]:
         alertas.append(_aviso("error", "No hay movimientos interpretables para comparar",
@@ -495,3 +548,29 @@ def reporte(banco, empresa, coincidencias, conciliacion=None):
     for a in alertas:
         r["conteo"][a["nivel"]] += 1
     return r
+
+
+def balance(banco, empresa, coincidencias):
+    """Cuadre de la diferencia entre banco y empresa.
+
+    Neto del banco - partidas sin conciliar del banco + partidas sin conciliar de
+    la empresa = neto de la empresa. Las coincidencias (automáticas y manuales) tienen
+    siempre el mismo monto en ambos lados, por lo que la diferencia debería explicarse
+    por completo con lo que no se concilió. Devuelve None si falta algún total.
+    """
+    sb, se = banco["stats"], empresa["stats"]
+    if not sb or not se:
+        return None
+    p = coincidencias["pendientes"]
+    sin_b = sum((m["monto"] for m in p["banco"]), CERO)
+    sin_e = sum((m["monto"] for m in p["empresa"]), CERO)
+    ajustado = sb["neto"] - sin_b + sin_e
+    return {
+        "neto_banco": sb["neto"], "neto_empresa": se["neto"],
+        "sin_conciliar_banco": sin_b, "n_banco": len(p["banco"]),
+        "sin_conciliar_empresa": sin_e, "n_empresa": len(p["empresa"]),
+        "neto_ajustado": ajustado, "sin_explicar": ajustado - se["neto"],
+        "cuadra": ajustado == se["neto"],
+        # Si hay filas sin fecha no participan en el emparejamiento y el cuadre no es exacto
+        "completo": sb["movimientos"] == len(banco["movimientos"]) and se["movimientos"] == len(empresa["movimientos"]),
+    }
