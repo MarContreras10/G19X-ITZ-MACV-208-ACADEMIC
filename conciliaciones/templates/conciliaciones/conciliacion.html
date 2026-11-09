@@ -273,7 +273,11 @@ document.querySelectorAll('.dz').forEach(function (dz) {
 
   function agregar(nuevos) {
     nuevos = Array.from(nuevos);
-    var validos = nuevos.filter(function (f) { return /\.csv$/i.test(f.name); });
+    var permitidas = (input.accept || '').toLowerCase().split(',');   // la lista viene del formulario
+    var validos = nuevos.filter(function (f) {
+      var n = f.name.toLowerCase();
+      return permitidas.some(function (ext) { return ext && n.endsWith(ext); });
+    });
     var rechazados = nuevos.length - validos.length;
     if (!multiple) { archivos = validos.slice(0, 1); }
     else {
@@ -284,7 +288,7 @@ document.querySelectorAll('.dz').forEach(function (dz) {
     sincronizar();
     if (rechazados) {
       var li = document.createElement('li'); li.className = 'err';
-      li.textContent = rechazados + ' archivo(s) ignorado(s): solo se aceptan .csv';
+      li.textContent = rechazados + ' archivo(s) ignorado(s): solo se aceptan ' + permitidas.join(', ');
       lista.appendChild(li);
     }
   }

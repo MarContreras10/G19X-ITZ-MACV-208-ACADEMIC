@@ -89,6 +89,7 @@ class VistaPreviaMixin:
 
     def get_context_data(self, **kwargs):
         ctx = super().get_context_data(**kwargs)
+        ctx["formatos_texto"] = services.FORMATOS_TEXTO
         obj = getattr(self, "object", None)
         if obj and obj.pk:
             archivos_banco, archivos_empresa, banco, empresa = _analizar(obj)
@@ -209,8 +210,10 @@ class RangoFechasArchivo(LoginRequiredMixin, View):
         archivo = request.FILES.get("archivo")
         if not archivo:
             return JsonResponse({"ok": False, "mensaje": "No se recibió ningún archivo."}, status=400)
-        if not archivo.name.lower().endswith(".csv"):
-            return JsonResponse({"ok": False, "mensaje": "Solo se aceptan archivos .csv."}, status=400)
+        if not services.extension_valida(archivo.name):
+            return JsonResponse({"ok": False, "mensaje": f"Solo se aceptan archivos {services.FORMATOS_TEXTO}."}, status=400)
+        if archivo.size > services.MAX_BYTES_ARCHIVO:
+            return JsonResponse({"ok": False, "mensaje": "El archivo es demasiado grande."}, status=400)
         try:
             r = services.rango_fechas(services.ArchivoEnMemoria(archivo.read()))
         except services.ErrorArchivo as e:

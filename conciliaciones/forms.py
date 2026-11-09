@@ -22,21 +22,22 @@ class MultipleFileField(forms.FileField):
         return [forms.FileField.clean(self, d, initial) for d in data]
 
 
-def _csv(attrs=None):
-    return {"accept": ".csv", **(attrs or {})}
+def _aceptados(attrs=None):
+    """Atributos del campo de archivo: los formatos permitidos salen de services.EXTENSIONES_ACEPTADAS."""
+    return {"accept": ",".join(services.EXTENSIONES_ACEPTADAS), **(attrs or {})}
 
 
 class ConciliacionForm(forms.ModelForm):
     banco_principal = forms.FileField(
-        label="Archivo principal", widget=forms.FileInput(attrs=_csv()))
+        label="Archivo principal", widget=forms.FileInput(attrs=_aceptados()))
     banco_complementarios = MultipleFileField(
         label="Archivos complementarios (opcional)", required=False,
-        widget=MultipleFileInput(attrs=_csv()))
+        widget=MultipleFileInput(attrs=_aceptados()))
     empresa_principal = forms.FileField(
-        label="Archivo principal", widget=forms.FileInput(attrs=_csv()))
+        label="Archivo principal", widget=forms.FileInput(attrs=_aceptados()))
     empresa_complementarios = MultipleFileField(
         label="Archivos complementarios (opcional)", required=False,
-        widget=MultipleFileInput(attrs=_csv()))
+        widget=MultipleFileInput(attrs=_aceptados()))
 
     class Meta:
         model = Conciliacion
@@ -52,26 +53,29 @@ class ConciliacionForm(forms.ModelForm):
         for campo in ("banco_desde", "banco_hasta", "empresa_desde", "empresa_hasta"):
             self.fields[campo].required = False
 
-    # --- validación: solo .csv ---
-    def _solo_csv(self, campo):
+    # --- validación: formato y tamaño del archivo ---
+    def _validar_archivos(self, campo):
         valor = self.cleaned_data.get(campo)
         archivos = valor if isinstance(valor, list) else ([valor] if valor else [])
         for a in archivos:
-            if not a.name.lower().endswith(".csv"):
-                raise forms.ValidationError(f"'{a.name}': por ahora solo se aceptan archivos .csv")
+            if not services.extension_valida(a.name):
+                raise forms.ValidationError(f"'{a.name}': solo se aceptan archivos {services.FORMATOS_TEXTO}.")
+            if a.size > services.MAX_BYTES_ARCHIVO:
+                raise forms.ValidationError(
+                    f"'{a.name}': pesa más de {services.MAX_BYTES_ARCHIVO // (1024 * 1024)} MB.")
         return valor
 
     def clean_banco_principal(self):
-        return self._solo_csv("banco_principal")
+        return self._validar_archivos("banco_principal")
 
     def clean_banco_complementarios(self):
-        return self._solo_csv("banco_complementarios")
+        return self._validar_archivos("banco_complementarios")
 
     def clean_empresa_principal(self):
-        return self._solo_csv("empresa_principal")
+        return self._validar_archivos("empresa_principal")
 
     def clean_empresa_complementarios(self):
-        return self._solo_csv("empresa_complementarios")
+        return self._validar_archivos("empresa_complementarios")
 
     def _rango_del_principal(self, prefijo, lado):
         """Rango de fechas del archivo principal de un lado (el recién subido o el ya guardado)."""

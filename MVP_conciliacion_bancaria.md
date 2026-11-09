@@ -20,7 +20,7 @@ Demostrar que el sistema puede **comparar archivos con estructuras distintas, em
 |---|---|---|
 | Acceso | Login, historial de conciliaciones, nueva conciliación *(ya hecho)* | **Hecho** |
 | Archivos | Archivo principal + complementarios por lado, rango de fechas por lado *(ya hecho)* | **Hecho**. El rango de fechas también puede tomarse solo del archivo principal |
-| Formatos | **CSV y Excel (.xlsx)** | **Parcial**: solo CSV; Excel es lo siguiente |
+| Formatos | **CSV y Excel (.xlsx)** | **Hecho**: CSV, TXT, TSV y XLSX |
 | Normalización | Modelo común de movimiento (fecha, monto con signo, descripción, referencia) | **Parcial**: se normaliza en memoria al leer los archivos; falta guardarlo en la base de datos |
 | Mapeo de columnas | Sugerencia automática + selector manual | **Parcial**: la sugerencia automática (por nombre de encabezado) está; falta el selector manual |
 | Emparejamiento | 1 a 1 por capas: monto + fecha, tolerancia de días y referencia | **Hecho** (4 capas) |
@@ -63,7 +63,7 @@ Cada incremento termina con algo que se puede **ejecutar y probar** antes de pas
 | 5 | **Tolerancia de días y referencia**; ambiguos a "sugeridos" | Los casos dudosos no se emparejan solos | **Hecho** |
 | 6 | **Reporte de pendientes y datos faltantes** | Lista por lado con su posible causa | **Parcial**: la lista por lado y los avisos están; falta la causa probable por partida |
 | 7 | **Emparejar a mano y deshacer** | Cualquier ajuste es reversible y queda registrado | **Hecho**, con dos pendientes: rechazar sugerencias y registrar también el deshacer |
-| 8 | **Entrada .xlsx** | Los mismos flujos funcionan con Excel | **Pendiente** |
+| 8 | **Entrada .xlsx** | Los mismos flujos funcionan con Excel | **Hecho**: también TXT, TSV, UTF-16 y montos con coma decimal |
 | 9 | **Exportar reporte** | Archivo descargable con el resumen | **Hecho** |
 
 **Se agregó además, sin estar en la lista original:**
@@ -133,14 +133,16 @@ El MVP se considera terminado cuando se cumplen los criterios de aceptación de 
 
 | Estado | Incrementos |
 |---|---|
-| **Hechos (5 de 9)** | 3 · Emparejamiento 1 a 1 con pruebas · 4 · Estados y colores · 5 · Tolerancia y referencia · 7 · Emparejar a mano y deshacer · 9 · Exportar el reporte |
+| **Hechos (6 de 9)** | 3 · Emparejamiento 1 a 1 con pruebas · 4 · Estados y colores · 5 · Tolerancia y referencia · 7 · Emparejar a mano y deshacer · 8 · Entrada .xlsx · 9 · Exportar el reporte |
 | **Parciales (2)** | 2 · Selector manual de columnas y duplicados · 6 · Reporte de pendientes (falta la causa probable) |
-| **Pendientes (2)** | 1 · Persistir movimientos · 8 · Entrada .xlsx |
+| **Pendientes (1)** | 1 · Persistir movimientos |
 
 **Criterios de aceptación:** 4 de 8 cumplidos; los otros 4 están en parcial o pendiente (ver sección 6).
 
-**Pruebas automáticas:** 62, todas pasan.
+**Pruebas automáticas:** 97, todas pasan.
 
-**Rendimiento (RNF-04):** medido con 10,000 filas por lado en un entorno de pruebas, abrir una conciliación tarda alrededor de 1 segundo; el Excel, unos 3 segundos; el PDF, alrededor de 1 segundo.
+**Rendimiento (RNF-04):** medido con 10,000 filas por lado en un entorno de pruebas, abrir una conciliación tarda alrededor de 1 segundo con CSV y 2 con Excel; exportar el Excel, unos 3 segundos; el PDF, alrededor de 1 segundo.
 
-**Siguiente paso sugerido:** leer Excel (.xlsx) junto con el selector manual de columnas (incrementos 8 y 2), idealmente con un extracto real anonimizado.
+**Fuera del alcance por ahora:** la lectura de PDF, imágenes y formatos bancarios estándar (MT940, CAMT.053, OFX), porque necesitan extractos reales para validarse.
+
+**Siguiente paso sugerido:** el selector manual de columnas (incremento 2) y la persistencia de movimientos (incremento 1).

@@ -76,10 +76,10 @@ Iniciar sesión
 - **RF-05** El usuario debe poder cargar un archivo principal y varios complementarios. — **[Hecho]**
 - **RF-06** El usuario debe poder cargar un archivo principal y varios complemetnarios en caso de ser necesario. — **[Hecho]** (es el mismo requerimiento que RF-05).
 - **RF-07** El sistema debe abisar si un archivo complementario repite filas ya existentes o tiene columnas que no coinciden con el principal — **[Hecho]** Avisa filas repetidas entre archivos y columnas que no coinciden; no excluye las repetidas de los totales.
-- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.). — **[Parcial]** Hoy solo CSV; Excel es lo siguiente. PDF, SWIFT e imágenes están pendientes.
+- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.). — **[Parcial]** Se leen CSV, TXT, TSV y XLSX. PDF, SWIFT (MT940, CAMT.053, OFX) e imágenes quedan pospuestos porque necesitan extractos reales para validarse.
 
 ### 7.3 Interpretacion de datos
-- **RF-09** El sistema debe detectar automaticamente codificacion, separador, formato de fecha y formato numerico. — **[Parcial]** En CSV detecta codificación (UTF-8/Latin-1), separador, 4 formatos de fecha y montos con `$`, comas y paréntesis; asume punto decimal.
+- **RF-09** El sistema debe detectar automaticamente codificacion, separador, formato de fecha y formato numerico. — **[Parcial]** Detecta codificación (UTF-8, UTF-16, Windows-1252), separador, el separador decimal de los montos (punto o coma, decidido por archivo; los casos ambiguos se avisan) y varios formatos de fecha (con hora o número de serie de Excel). Falta el formato MM/DD/AAAA y distinguir día de mes.
 - **RF-10** El sistema debe sugerir a que campo corresponde cada columna (fecha, monto, descripcion, referencia) y permitir al usuario corregirlo manualmente — **[Parcial]** Sugiere la columna por el nombre del encabezado; falta el selector manual.
 - **RF-11** El sistema debe soportar montos en una sola columna con signo o en dos columnas (cargo y abono). — **[Hecho]**
 - **RF-12** Las filas que no se puedan interpretar deben listarse con su motivo, nunca descartarse en silencio. — **[Hecho]** Se listan con archivo, número de fila y motivo (el reporte muestra hasta 5 ejemplos).
@@ -155,9 +155,9 @@ Además de las capas, las conciliaciones manuales se aplican primero y sus movim
 - **RNF-01** Los montos deben manejarse con precision decimal, nunca con punto flotante. — **[Hecho]**
 - **RNF-02** Ante la duda, el sistema debe dejar un movimiento penditente en lugar de emparejarlo incorrectamente. — **[Hecho]**
 - **RNF-03** Cada movimiento debe poder rastrearse hasta su archivo y su fila original. — **[Hecho]** Cada movimiento guarda su archivo y su fila; el Excel incluye la fila de origen.
-- **RNF-04** Un archivo de hasta 10,000 filas debe procesarse en un tiempo razonable sin que la interfaz se congele. — **[Hecho]** Medido con 10,000 filas por lado (entorno de pruebas): abrir la conciliación ≈ 1 s, Excel ≈ 3 s, PDF ≈ 1 s. El procesamiento es síncrono.
+- **RNF-04** Un archivo de hasta 10,000 filas debe procesarse en un tiempo razonable sin que la interfaz se congele. — **[Hecho]** Medido con 10,000 filas por lado (entorno de pruebas): abrir la conciliación ≈ 1 s con CSV y ≈ 2 s con Excel; exportar a Excel ≈ 3 s y a PDF ≈ 1 s. El procesamiento es síncrono.
 - **RNF-05** Un usuario debe poder completar una conciliacion sin editar los archivos originales. — **[Parcial]** Se cumple con CSV cuyas columnas se reconocen por nombre; falta el selector manual.
-- **RNF-06** La logica de emparejamiento debe estar separada de la interfaz y cubierta por pruebas automaticas. — **[Hecho]** El motor está en `services.py`, separado de la interfaz, con 62 pruebas automáticas.
+- **RNF-06** La logica de emparejamiento debe estar separada de la interfaz y cubierta por pruebas automaticas. — **[Hecho]** El motor está en `services.py`, separado de la interfaz, con 97 pruebas automáticas.
 
 ## 11. Métricas de éxito
 
@@ -187,8 +187,8 @@ Además de las capas, las conciliaciones manuales se aplican primero y sus movim
 5. **Tolerancias y referencia**; casos ambiguos a revisión. — **[Hecho]**
 6. **Reporte de partidas pendientes** y datos faltantes. — **[Parcial]** Falta la causa probable por partida.
 7. **Conciliación manual** y deshacer. — **[Hecho]** Faltan rechazar sugerencias y registrar el deshacer.
-8. **Excel (.xlsx)** como formato de entrada. — **[Pendiente]**
+8. **Excel (.xlsx)** como formato de entrada. — **[Hecho]** Primera hoja visible con datos; el encabezado es su primera fila con contenido.
 9. **Exportación del reporte.** — **[Hecho]** Excel, PDF y CSV.
 10. Etapas posteriores: 1 a N, PDF/OCR, roles y aprobación. — **[Pendiente]**
 
-**Se implementó además, sin estar en la hoja de ruta:** rango de fechas automático a partir del archivo principal; conciliación manual de 1 a N y N a N; caja de avisos del reporte (errores, advertencias, sugerencias e informativos); cuadre de la diferencia (balance) en las exportaciones; y configuración sensible fuera del código mediante variables de entorno.
+**Se implementó además, sin estar en la hoja de ruta:** rango de fechas automático a partir del archivo principal; conciliación manual de 1 a N y N a N; caja de avisos del reporte (errores, advertencias, sugerencias e informativos); cuadre de la diferencia (balance) en las exportaciones; lectura de TXT y TSV, de archivos UTF-16 y de montos con coma decimal (sin interpretar en silencio un formato equivocado); límites de tamaño y validación del contenido de los archivos subidos; y configuración sensible fuera del código mediante variables de entorno.

@@ -8,7 +8,7 @@ Aplicación web hecha con Django que compara los movimientos de un **extracto ba
 
 - **Acceso:** inicio de sesión; cada usuario ve solo sus conciliaciones.
 - **Inicio:** botón de nueva conciliación e historial.
-- **Carga de archivos:** por cada lado (banco y empresa), un rango de fechas, un archivo principal y varios complementarios. Selectores con arrastrar y soltar. Si no escribes las fechas, el rango se toma del archivo principal.
+- **Carga de archivos:** por cada lado (banco y empresa), un rango de fechas, un archivo principal y varios complementarios. Acepta **CSV, TXT, TSV y Excel (.xlsx)**. Selectores con arrastrar y soltar. Si no escribes las fechas, el rango se toma del archivo principal.
 - **Vista previa:** paneles desplazables con las filas de cada lado. Azul = banco, verde = empresa; los complementarios se distinguen con borde punteado y un **+**. Las columnas que se comparan aparecen resaltadas.
 - **Tabla de coincidencias:** muestra cada movimiento como *Conciliado*, *Por revisar*, *Solo banco* o *Solo empresa*, con la regla aplicada y su confianza. Tiene filtros y una tolerancia de fecha ajustable.
 - **Conciliación manual:** una sección con los movimientos pendientes de cada lado. Marcas los que se corresponden, la barra inferior suma cada lado y el botón **Conciliar** se activa cuando los totales coinciden (1 a 1, 1 a varios o varios a varios). Los casos *Por revisar* se pueden **aceptar** con un clic desde la tabla, y cualquier conciliación manual se puede **deshacer**.
@@ -18,7 +18,7 @@ Aplicación web hecha con Django que compara los movimientos de un **extracto ba
 ## Requisitos
 
 - **Python 3.10 o superior.**
-- Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS, python-dotenv, openpyxl y reportlab), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
+- Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS, python-dotenv, openpyxl, defusedxml y reportlab), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
 - Git (opcional, para clonar el repositorio).
 
 ## Instalación y ejecución
@@ -80,7 +80,12 @@ Para trabajar en tu computadora, deja `DJANGO_DEBUG=True` en tu `.env`.
 
 ## Formato de los archivos
 
-Por ahora solo se aceptan archivos **`.csv`** con encabezados en la primera fila.
+| Formato | Extensiones | Cómo se lee |
+|---|---|---|
+| Texto delimitado | `.csv`, `.txt`, `.tsv` | Separador detectado (`,` `;` tabulador o `\|`). Codificación detectada: UTF-8 (con o sin BOM), UTF-16 y Windows-1252. |
+| Excel | `.xlsx` | Primera hoja **visible con datos**. Fechas y números se leen como tipos reales de Excel. |
+
+En ambos casos, el **encabezado es la primera fila con contenido** (puede haber filas vacías arriba) y las columnas se reconocen por su nombre:
 
 | Dato | Nombres de columna reconocidos |
 |---|---|
@@ -90,11 +95,12 @@ Por ahora solo se aceptan archivos **`.csv`** con encabezados en la primera fila
 | Descripción | `descripcion`, `concepto`, `detalle`, `description` |
 | Referencia | `referencia`, `folio`, `reference` |
 
-- Se detectan solos la **codificación** (UTF-8 o Latin-1) y el **separador** (`,` `;` tabulador o `|`).
-- Formatos de fecha aceptados: `AAAA-MM-DD`, `DD/MM/AAAA`, `DD-MM-AAAA` y `DD/MM/AA`.
-- **Montos:** se aceptan `$`, comas de miles y paréntesis como negativo. Se asume **punto decimal** (no se leen formatos como `1.234,56`).
+- **Fechas:** `AAAA-MM-DD`, `DD/MM/AAAA`, `DD-MM-AAAA` y `DD/MM/AA`, con hora opcional (`2026-10-01 14:35`), y el número de serie de Excel (por ejemplo `46296`).
+- **Montos:** se aceptan `$`, separadores de miles, paréntesis o guion final como negativo, y **punto o coma decimal** (`1,234.50` y `1.234,50`). El separador se decide **por archivo** a partir de los valores que lo dejan claro. Si un archivo mezcla ambos formatos, o hay valores ambiguos como `1.234`, el reporte lo avisa y las filas que no siguen el formato se listan como no interpretables: nunca se interpretan en silencio.
 - **Signo del monto:** positivo = ingreso, negativo = egreso. Con cargo y abono se calcula *abono − cargo*. Si un archivo usa la convención contraria, no habrá coincidencias; el reporte lo avisa.
 - Los **complementarios** se alinean al principal por el nombre de la columna. Las columnas que el principal no tiene se ignoran (y se avisa).
+- El formato se decide por el **contenido** del archivo, no por su extensión. Se rechazan los PDF, los `.xls` antiguos y cualquier archivo que pese más de 25 MB (o tenga más de 200,000 filas).
+- Si el libro de Excel tiene varias hojas, se avisa cuál se leyó.
 
 ## Cómo se empareja
 
@@ -140,7 +146,7 @@ python manage.py test conciliaciones
 
 (Requiere que exista tu archivo `.env` con la clave configurada.)
 
-Son **62 pruebas**: lectura de archivos con formatos distintos, emparejamiento (tolerancia, ambigüedad, referencia, unicidad), alertas del reporte, conciliación manual (permisos, validaciones, deshacer, efecto de reemplazar archivos), rango de fechas automático y exportación (Excel, PDF y CSV).
+Son **97 pruebas**: lectura de CSV, TXT, TSV y Excel (codificaciones, separadores, hojas, filas y columnas vacías, archivos dañados o falsos, límites de tamaño), montos con punto y coma decimal, emparejamiento (tolerancia, ambigüedad, referencia, unicidad), alertas del reporte, conciliación manual (permisos, validaciones, deshacer, efecto de reemplazar archivos), rango de fechas automático y exportación (Excel, PDF y CSV).
 
 ### Pruebas con los datos de ejemplo
 
@@ -153,6 +159,9 @@ La carpeta `sample_data/` contiene:
 | `banco_complemento.csv` / `empresa_complemento.csv` | 2 movimientos más por lado (intereses y comisión SPEI). Traen una columna extra (`Notas`) que se ignora. |
 | `banco_ambiguo.csv` / `empresa_ambiguo.csv` | Los mismos 2 movimientos anteriores, más 2 pagos de 50.00 que generan coincidencias ambiguas. |
 | `banco_manual.csv` / `empresa_manual.csv` | Un depósito de 100.00 en el banco contra dos cobros de 60.00 y 40.00 en la empresa (fechas fuera de la tolerancia): caso de conciliación manual de 1 a 2. |
+| `banco.xlsx` / `empresa.xlsx` | Los mismos datos que `banco.csv` y `empresa.csv`, en Excel. `empresa.xlsx` trae el encabezado en la **fila 3** y una segunda hoja de resumen que no se lee. |
+| `banco.txt` / `banco_utf16.txt` | `banco.csv` separado por tabulador, en UTF-8 y en UTF-16 (como «Texto Unicode» de Excel). |
+| `empresa_coma_decimal.csv` | `empresa.csv` con coma decimal y punto de miles (`15.000,00`). |
 
 **Rango de fechas base: del 01/10/2026 al 31/10/2026**, en banco y en empresa.
 
@@ -171,6 +180,9 @@ La carpeta `sample_data/` contiene:
 | 9 | Principales + `banco_manual.csv` y `empresa_manual.csv` | 01/10–31/10 / 01/10–31/10 | **4 conciliados**, 2 solo banco (comisión y depósito de 100.00) y 3 solo empresa (renta, 60.00 y 40.00). En *Conciliación manual*, marca el depósito y los dos cobros: la barra muestra diferencia 0.00 y se activa **Conciliar**. Resultado: **1 manual**, 1 solo banco, 1 solo empresa. La diferencia sigue en 5,850.00. |
 | 10 | Solo principales, **sin escribir fechas** | vacío / vacío | Las fechas se toman de cada archivo: banco 01/10/2026–02/11/2026 y empresa 01/10/2026–09/10/2026. Mensaje informativo de rango tomado del archivo. |
 | 11 | Principales + `*_ambiguo.csv` + `*_manual.csv`, y el depósito conciliado a mano (escenario 9) | 01/10–31/10 / 01/10–31/10 | **6 automáticos, 1 manual, 2 por revisar**, 1 solo banco y 1 solo empresa. Al exportar: Excel con 4 hojas, PDF de 3 páginas con 3 gráficas y balance **CUADRA**. |
+| 12 | `banco.xlsx` + `empresa.xlsx` | 01/10–31/10 / 01/10–31/10 | **Mismo resultado que el escenario 1** (4 conciliados, 1 solo banco, 1 solo empresa, diferencia 5,850.00). Aviso informativo: «empresa.xlsx: Se leyó la hoja «Libro»». |
+| 13 | `banco_utf16.txt` + `empresa_coma_decimal.csv` | 01/10–31/10 / 01/10–31/10 | **Mismo resultado que el escenario 1.** Aviso informativo: «montos con coma decimal». |
+| 14 | Intentar cargar un `.pdf` o un `.xls` | — | Se rechaza: «solo se aceptan archivos CSV, TXT, TSV o XLSX» (en el navegador, antes de subirlo). |
 
 **Qué más verificar en la interfaz**
 - Los filtros de la tabla (Conciliados, Por revisar, Solo banco, Solo empresa) muestran el número de filas indicado en cada botón.
@@ -225,14 +237,15 @@ media/
 
 ## Limitaciones conocidas
 
-- Solo CSV (Excel, PDF, otros archivos e imágenes están pendientes).
+- Solo se leen CSV, TXT, TSV y XLSX. **PDF, imágenes y formatos bancarios estándar (MT940, CAMT.053, OFX) quedan pospuestos**, porque necesitan extractos reales para validarse. Tampoco se leen `.xls`, `.ods` ni `.xlsm`.
 - Los movimientos no se guardan en la base de datos: se vuelven a leer de los archivos en cada consulta. Las conciliaciones manuales se guardan por archivo y fila, por lo que reemplazar un archivo principal o quitar un complementario las deshace.
 - La tolerancia de fecha no se guarda; vuelve a 3 días al recargar la página.
 - Falta **rechazar** sugerencias, una bitácora que registre también el deshacer y las notas de justificación en partidas pendientes.
 - Las filas repetidas entre archivos solo se **avisan**: siguen sumando en los totales.
 - No hay selector manual de columnas: se reconocen por el nombre del encabezado.
-- Los montos asumen punto decimal.
-- Rendimiento medido con 10,000 filas por lado (en un entorno de pruebas): abrir una conciliación tarda ≈ 1 s, el Excel ≈ 3 s y el PDF ≈ 1 s. El procesamiento es síncrono.
+- Excel: se lee la primera hoja visible con datos; las fórmulas que nunca se calcularon en Excel (por ejemplo, las que genera un programa) se leen vacías; y las fechas se reconocen en los formatos de la lista (no MM/DD/AAAA).
+- El encabezado debe ser la primera fila con contenido: si el archivo trae títulos o datos del banco antes de la tabla, el reporte lo avisa y muestra las columnas que leyó.
+- Rendimiento medido con 10,000 filas por lado (en un entorno de pruebas): abrir una conciliación tarda ≈ 1 s con CSV y ≈ 2 s con Excel (cada consulta vuelve a leer los archivos), exportar a Excel ≈ 3 s y a PDF ≈ 1 s. El procesamiento es síncrono.
 - Pensado para desarrollo local con SQLite. Antes de publicarlo en un servidor: `DJANGO_DEBUG=False`, una `DJANGO_SECRET_KEY` nueva y `DJANGO_ALLOWED_HOSTS` con tu dominio, una base de datos de producción, HTTPS y un servidor de producción en lugar de `runserver`.
 
 ## Documentación relacionada

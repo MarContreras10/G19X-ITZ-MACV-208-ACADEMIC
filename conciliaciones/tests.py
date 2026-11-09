@@ -424,7 +424,7 @@ class RangoFechasVistasTests(TestCase):
 
     def test_endpoint_errores(self):
         self.assertEqual(self.client.post("/api/rango-fechas/").status_code, 400)
-        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.xlsx", b"x")})
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.pdf", b"x")})
         self.assertEqual(r.status_code, 400)
         r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.csv", b"Texto\nhola\n")})
         self.assertEqual((r.status_code, r.json()["ok"]), (200, False))
@@ -586,3 +586,344 @@ class ExportacionTests(TestCase):
         self.assertEqual(self.descargar("pdf").status_code, 404)           # no es su conciliación
         self.client.logout()
         self.assertEqual(self.descargar("pdf").status_code, 302)           # exige iniciar sesión
+
+
+# ======================================================================================
+#  Lectura de formatos: texto (CSV, TXT, TSV), Excel (.xlsx) y montos con coma decimal
+# ======================================================================================
+import io
+from unittest import mock
+
+from openpyxl import Workbook
+
+
+class _Binario:
+    """Archivo falso con bytes (para codificaciones y Excel)."""
+    def __init__(self, datos):
+        self._d = datos
+
+    def open(self, modo="rb"):
+        pass
+
+    def read(self):
+        return self._d
+
+    def close(self):
+        pass
+
+
+def binario(datos):
+    return _Binario(datos)
+
+
+def archivo_bytes(nombre, datos, pk=None):
+    return SimpleNamespace(nombre=nombre, archivo=_Binario(datos), pk=pk)
+
+
+def libro_xlsx(*hojas):
+    """Crea un .xlsx. Cada hoja es (titulo, {(fila, columna): valor}, estado)."""
+    wb = Workbook()
+    wb.remove(wb.active)
+    for titulo, celdas, estado in hojas:
+        ws = wb.create_sheet(titulo)
+        ws.sheet_state = estado
+        for (fila, col), valor in celdas.items():
+            ws.cell(row=fila, column=col, value=valor)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def filas_en(fila_inicial, tabla):
+    """Convierte una tabla (lista de listas) en celdas {(fila, col): valor} desde `fila_inicial`."""
+    return {(fila_inicial + i, j + 1): v for i, fila in enumerate(tabla) for j, v in enumerate(fila) if v is not None}
+
+
+class LecturaTextoTests(SimpleTestCase):
+    CONTENIDO = "Fecha;Descripcion;Monto\n2026-10-01;Depósito niño;100.00\n"
+
+    def test_codificaciones(self):
+        variantes = {
+            "UTF-8": self.CONTENIDO.encode("utf-8"),
+            "UTF-8 con BOM": self.CONTENIDO.encode("utf-8-sig"),
+            "Windows-1252": self.CONTENIDO.encode("cp1252"),
+            "UTF-16 con BOM": self.CONTENIDO.encode("utf-16"),
+            "UTF-16 LE sin BOM": self.CONTENIDO.encode("utf-16-le"),
+            "UTF-16 BE sin BOM": self.CONTENIDO.encode("utf-16-be"),
+        }
+        for nombre, datos in variantes.items():
+            with self.subTest(nombre):
+                columnas, filas, numeros = services.leer_tabla(binario(datos))
+                self.assertEqual(columnas, ["Fecha", "Descripcion", "Monto"])
+                self.assertEqual(filas, [["2026-10-01", "Depósito niño", "100.00"]])
+                self.assertEqual(numeros, [2])
+
+    def test_separadores(self):
+        for sep in (",", ";", "\t", "|"):
+            with self.subTest(repr(sep)):
+                datos = self.CONTENIDO.replace(";", sep).encode()
+                columnas, filas, _ = services.leer_tabla(binario(datos))
+                self.assertEqual(columnas, ["Fecha", "Descripcion", "Monto"])
+                self.assertEqual(len(filas), 1)
+
+    def test_el_encabezado_es_la_primera_fila_con_datos_y_los_numeros_son_del_archivo(self):
+        datos = ("\n\n" + self.CONTENIDO + "\n2026-10-02;Otro;5.00\n").encode()
+        columnas, filas, numeros = services.leer_tabla(binario(datos))
+        self.assertEqual(columnas, ["Fecha", "Descripcion", "Monto"])
+        self.assertEqual(numeros, [4, 6])      # encabezado en la fila 3; la fila 5 está vacía
+
+    def test_pdf_y_excel_antiguo_dan_un_mensaje_claro(self):
+        with self.assertRaisesMessage(services.ErrorArchivo, "PDF"):
+            services.leer_tabla(binario(b"%PDF-1.7\n1 0 obj"))
+        with self.assertRaisesMessage(services.ErrorArchivo, ".xls"):
+            services.leer_tabla(binario(b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" + b"\x00" * 50))
+
+    def test_caracteres_nulos_en_un_archivo_de_texto(self):
+        with self.assertRaisesMessage(services.ErrorArchivo, "no parece de texto"):
+            services.leer_tabla(binario(b"Fecha,Monto\n2026-10-01,1\x00\n"))
+
+    def test_limites_de_tamano_y_de_filas(self):
+        with mock.patch.object(services, "MAX_BYTES_ARCHIVO", 10):
+            with self.assertRaisesMessage(services.ErrorArchivo, "pesa más de"):
+                services.leer_tabla(binario(self.CONTENIDO.encode()))
+        with mock.patch.object(services, "MAX_FILAS_ARCHIVO", 1):
+            with self.assertRaisesMessage(services.ErrorArchivo, "más de"):
+                services.leer_tabla(binario(("Fecha,Monto\n" + "2026-10-01,1\n" * 5).encode()))
+
+    def test_los_errores_de_fecha_muestran_las_columnas_leidas(self):
+        datos = b"BANCO X\nCuenta 123456\n\nFecha,Monto\n2026-10-01,1\n"
+        with self.assertRaises(services.ErrorArchivo) as ctx:
+            services.rango_fechas(binario(datos))
+        self.assertIn("Columnas leídas: BANCO X", str(ctx.exception))
+
+    def test_fechas_con_hora_y_numero_de_serie_de_excel(self):
+        for texto in ("2026-10-01 14:35:00", "2026-10-01T09:00:00", "01/10/2026 14:35"):
+            self.assertEqual(services._fecha(texto), date(2026, 10, 1), texto)
+        serie = (date(2026, 10, 1) - date(1899, 12, 30)).days
+        self.assertEqual(services._fecha(str(serie)), date(2026, 10, 1))
+        self.assertEqual(services._fecha(f"{serie}.0"), date(2026, 10, 1))
+        self.assertIsNone(services._fecha("12345"))     # no es una fecha plausible
+        self.assertIsNone(services._fecha("99999"))
+        self.assertIsNone(services._fecha(""))
+
+
+class MontosTests(SimpleTestCase):
+    def test_punto_decimal(self):
+        casos = {"1,234.50": D("1234.50"), "$ 1,234.50": D("1234.50"), "(1,234.50)": D("-1234.50"), "100.00-": D("-100.00"),
+                 "-40": D("-40"), "+5": D("5"), "1 234.50": D("1234.50"), "1,234": D("1234"), "7": D("7")}
+        for texto, esperado in casos.items():
+            self.assertEqual(services._monto(texto, "."), esperado, texto)
+
+    def test_coma_decimal(self):
+        casos = {"1.234,50": D("1234.50"), "40,00": D("40.00"), "-40,00": D("-40.00"), "(1.234,50)": D("-1234.50"),
+                 "1234,5": D("1234.5"), "100,00-": D("-100.00"), "1.234": D("1234"), "$ 1.234,50": D("1234.50")}
+        for texto, esperado in casos.items():
+            self.assertEqual(services._monto(texto, ","), esperado, texto)
+
+    def test_valores_que_no_son_montos(self):
+        for texto in ("abc", "", "   ", "1.2.3", "NaN", "Infinity", "-inf", "12a"):
+            self.assertIsNone(services._monto(texto, "."), texto)
+
+    def test_convencion_decimal(self):
+        c = services.convencion_decimal(["1.234,50", "40,00", "100"])
+        self.assertEqual((c["convencion"], c["coma"], c["punto"]), (",", 2, 0))
+        c = services.convencion_decimal(["1,234.50", "40.00"])
+        self.assertEqual((c["convencion"], c["coma"], c["punto"]), (".", 0, 2))
+        c = services.convencion_decimal(["1.234,50", "1,234.50"])
+        self.assertTrue(c["coma"] and c["punto"])                       # mezcla
+        c = services.convencion_decimal(["1.234", "5.000"])
+        self.assertEqual((c["convencion"], c["ambiguos"]), (".", 2))    # ¿miles o decimales? se avisa
+        c = services.convencion_decimal(["100", "1,234", ""])
+        self.assertEqual((c["convencion"], c["ambiguos"], c["coma"], c["punto"]), (".", 0, 0, 0))
+
+    def test_contradice(self):
+        self.assertTrue(services._contradice("40,00", "."))
+        self.assertTrue(services._contradice("1,234.50", ","))
+        self.assertFalse(services._contradice("40.00", "."))
+        self.assertFalse(services._contradice("100", ","))
+
+    def _analizar(self, contenido, nombre="m.csv"):
+        return services.analizar([archivo(nombre, contenido)], *RANGO, "BANCO")
+
+    def test_archivo_con_coma_decimal_se_lee_bien_y_se_avisa(self):
+        r = self._analizar("Fecha;Descripcion;Monto\n01/10/2026;Dep;1.234,50\n02/10/2026;Pago;-40,00\n")
+        self.assertEqual((r["stats"]["ingresos"], r["stats"]["egresos"]), (D("1234.50"), D("-40.00")))
+        self.assertTrue(any(a["nivel"] == "info" and "coma decimal" in a["titulo"] for a in r["avisos"]))
+
+    def test_no_se_lee_en_silencio_un_monto_con_el_formato_contrario(self):
+        r = self._analizar("Fecha;Monto\n01/10/2026;1.234,50\n02/10/2026;40,00\n03/10/2026;1,234.50\n")
+        self.assertEqual(r["stats"]["movimientos"], 2)            # la fila con formato distinto no suma
+        self.assertEqual(r["stats"]["ingresos"], D("1274.50"))
+        avisos = {a["titulo"]: a["detalle"] for a in r["avisos"]}
+        self.assertTrue(any("mezclan formatos" in t for t in avisos))
+        self.assertIn("fila 4", next(d for t, d in avisos.items() if "no se pudieron interpretar" in t))
+
+    def test_monto_ambiguo_se_avisa(self):
+        r = self._analizar("Fecha,Monto\n2026-10-01,1.234\n2026-10-02,5.000\n")
+        self.assertTrue(any("ambiguos" in a["titulo"] for a in r["avisos"]))
+
+    def test_cargo_y_abono_invalidos_ya_no_se_ignoran(self):
+        r = self._analizar("Fecha,Cargo,Abono\n2026-10-01,abc,100\n2026-10-02,,50\n")
+        self.assertEqual(r["stats"]["movimientos"], 1)
+        self.assertEqual(r["sin_interpretar"], 1)
+
+    def test_cada_archivo_tiene_su_propio_formato_decimal(self):
+        punto = archivo("p.csv", "Fecha,Monto\n2026-10-01,1234.50\n", pk=1)
+        coma = archivo("c.csv", "Fecha,Monto\n2026-10-02,1.234,50\n".replace("1.234,50", '"1.234,50"'), pk=2)
+        r = services.analizar([punto, coma], *RANGO, "BANCO")
+        self.assertEqual(r["stats"]["ingresos"], D("2469.00"))
+
+
+class LecturaExcelTests(SimpleTestCase):
+    def test_celdas_a_texto(self):
+        self.assertEqual(services._celda_a_texto(1234.5), "1234.5")
+        self.assertEqual(services._celda_a_texto(100.0), "100")
+        self.assertEqual(services._celda_a_texto(0.1 + 0.2), "0.3")              # sin ruido de coma flotante
+        self.assertEqual(services._celda_a_texto(-5), "-5")
+        self.assertEqual(services._celda_a_texto(None), "")
+        self.assertEqual(services._celda_a_texto(float("nan")), "")
+        self.assertEqual(services._celda_a_texto(date(2026, 10, 1)), "2026-10-01")
+        from datetime import datetime as dt
+        self.assertEqual(services._celda_a_texto(dt(2026, 10, 1, 14, 30)), "2026-10-01")
+        self.assertEqual(services._celda_a_texto("  hola  "), "hola")
+
+    def test_tipos_numeros_de_fila_y_encabezado_con_filas_vacias_arriba(self):
+        from datetime import datetime as dt
+        tabla = [["Fecha", "Descripcion", "Monto"],
+                 [dt(2026, 10, 1, 14, 30), "Depósito", 1234.5],
+                 [date(2026, 10, 2), "Pago", -40]]
+        datos = libro_xlsx(("Libro", filas_en(3, tabla) | {(7, 1): date(2026, 10, 9), (7, 2): "Otro", (7, 3): 5.0}, "visible"))
+        columnas, filas, numeros = services.leer_tabla(binario(datos))
+        self.assertEqual(columnas, ["Fecha", "Descripcion", "Monto"])
+        self.assertEqual(filas, [["2026-10-01", "Depósito", "1234.5"], ["2026-10-02", "Pago", "-40"], ["2026-10-09", "Otro", "5"]])
+        self.assertEqual(numeros, [4, 5, 7])        # los mismos números de fila que ve el usuario en Excel
+
+    def test_primera_hoja_visible_con_datos_y_nota(self):
+        oculta = ("Oculta", {(1, 1): "no", (2, 1): "leer"}, "hidden")
+        vacia = ("Vacía", {}, "visible")
+        buena = ("Libro", filas_en(1, [["Fecha", "Monto"], ["2026-10-01", 1]]), "visible")
+        otra = ("Otra", filas_en(1, [["X"], ["y"]]), "visible")
+        columnas, filas, numeros, notas = services.leer_tabla_con_notas(binario(libro_xlsx(oculta, vacia, buena, otra)))
+        self.assertEqual(columnas, ["Fecha", "Monto"])
+        self.assertEqual(notas[0][0:2], ("info", "Se leyó la hoja «Libro»"))
+        self.assertIn("4 hojas", notas[0][2])
+
+    def test_una_sola_hoja_no_genera_nota(self):
+        datos = libro_xlsx(("Libro", filas_en(1, [["Fecha", "Monto"], ["2026-10-01", 1]]), "visible"))
+        self.assertEqual(services.leer_tabla_con_notas(binario(datos))[3], [])
+
+    def test_encabezados_vacios_y_columnas_a_la_derecha_no_se_pierden(self):
+        celdas = filas_en(1, [["Fecha", None, "Monto"], ["2026-10-01", "x", 5]]) | {(2, 5): "dato lejano"}
+        columnas, filas, _ = services.leer_tabla(binario(libro_xlsx(("H", celdas, "visible"))))
+        self.assertEqual(columnas, ["Fecha", "Columna 2", "Monto", "Columna 4", "Columna 5"])
+        self.assertEqual(filas[0], ["2026-10-01", "x", "5", "", "dato lejano"])
+
+    def test_archivos_que_no_son_excel(self):
+        with self.assertRaisesMessage(services.ErrorArchivo, "no es un Excel"):
+            services.leer_tabla(binario(b"PK\x03\x04 esto no es un zip de verdad"))
+        buf = io.BytesIO()
+        import zipfile as zf
+        with zf.ZipFile(buf, "w") as z:
+            z.writestr("hola.txt", "no soy un libro")
+        with self.assertRaisesMessage(services.ErrorArchivo, "no un libro de Excel"):
+            services.leer_tabla(binario(buf.getvalue()))
+        bueno = libro_xlsx(("H", filas_en(1, [["Fecha"], ["2026-10-01"]]), "visible"))
+        with self.assertRaises(services.ErrorArchivo):                       # archivo truncado
+            services.leer_tabla(binario(bueno[: len(bueno) // 2]))
+
+    def test_libro_sin_hojas_visibles_con_datos(self):
+        datos = libro_xlsx(("A", {}, "visible"), ("B", {(1, 1): "x"}, "hidden"))
+        with self.assertRaisesMessage(services.ErrorArchivo, "no tiene hojas visibles"):
+            services.leer_tabla(binario(datos))
+
+    def test_limite_de_tamano_descomprimido(self):
+        datos = libro_xlsx(("H", filas_en(1, [["Fecha"], ["2026-10-01"]]), "visible"))
+        with mock.patch.object(services, "MAX_DESCOMPRIMIDO", 100):
+            with self.assertRaisesMessage(services.ErrorArchivo, "demasiado grande"):
+                services.leer_tabla(binario(datos))
+
+    def test_excel_y_csv_se_emparejan_entre_si(self):
+        from datetime import datetime as dt
+        banco = libro_xlsx(("Extracto", filas_en(1, [["Fecha", "Descripcion", "Referencia", "Monto"],
+                                                       [dt(2026, 10, 1), "Depósito", "F1", 1234.5],
+                                                       [dt(2026, 10, 2), "Pago", "P1", -40]]), "visible"))
+        empresa = "Fecha;Concepto;Folio;Cargo;Abono\n01/10/2026;Cobro;F1;;\"1.234,50\"\n02/10/2026;Pago;P1;40,00;\n"
+        b = services.analizar([archivo_bytes("banco.xlsx", banco, pk=1)], *RANGO, "BANCO")
+        e = services.analizar([archivo("empresa.csv", empresa, pk=2)], *RANGO, "EMPRESA")
+        r = services.emparejar(b["movimientos"], e["movimientos"])
+        self.assertEqual(r["resumen"]["conciliados"], 2)
+        self.assertEqual(b["stats"]["neto"], e["stats"]["neto"])
+
+    def test_fechas_como_numero_de_serie_y_montos_como_texto(self):
+        serie = (date(2026, 10, 1) - date(1899, 12, 30)).days
+        datos = libro_xlsx(("H", filas_en(1, [["Fecha", "Monto"], [serie, "1.234,50"], [serie, "-40,00"]]), "visible"))
+        r = services.analizar([archivo_bytes("x.xlsx", datos)], *RANGO, "BANCO")
+        self.assertEqual((r["stats"]["ingresos"], r["stats"]["egresos"]), (D("1234.50"), D("-40.00")))
+        self.assertEqual(r["rango_principal"], (date(2026, 10, 1), date(2026, 10, 1)))
+
+    def test_analizar_avisa_la_hoja_leida(self):
+        datos = libro_xlsx(("Libro", filas_en(1, [["Fecha", "Monto"], ["2026-10-01", 1]]), "visible"), ("Resumen", filas_en(1, [["x"]]), "visible"))
+        r = services.analizar([archivo_bytes("x.xlsx", datos)], *RANGO, "BANCO")
+        self.assertTrue(any("x.xlsx: Se leyó la hoja «Libro»" == a["titulo"] for a in r["avisos"]))
+
+
+@override_settings(MEDIA_ROOT=tempfile.mkdtemp())
+class FormatosVistasTests(TestCase):
+    """Carga de .txt y .xlsx desde el formulario real."""
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        from django.conf import settings
+        shutil.rmtree(settings.MEDIA_ROOT, ignore_errors=True)
+
+    def setUp(self):
+        self.client.force_login(User.objects.create_user("ana"))
+        self.banco_xlsx = libro_xlsx(("Extracto", filas_en(1, [["Fecha", "Descripcion", "Referencia", "Monto"],
+                                                              [date(2026, 10, 1), "Depósito", "F1", 100.5],
+                                                              [date(2026, 10, 3), "Pago", "P1", -30]]), "visible"))
+        self.empresa_txt = "Fecha\tConcepto\tFolio\tMonto\n2026-10-01\tCobro\tF1\t100.50\n2026-10-03\tPago\tP1\t-30.00\n"
+
+    def crear(self, banco, empresa):
+        return self.client.post("/conciliacion/nueva/", {"banco_principal": banco, "empresa_principal": empresa}, follow=True)
+
+    def test_excel_contra_txt_se_concilian_y_el_rango_sale_del_archivo(self):
+        resp = self.crear(SimpleUploadedFile("banco.xlsx", self.banco_xlsx), SimpleUploadedFile("empresa.txt", self.empresa_txt.encode()))
+        self.assertEqual(resp.status_code, 200)
+        c = Conciliacion.objects.get()
+        self.assertEqual((c.banco_desde, c.banco_hasta), (date(2026, 10, 1), date(2026, 10, 3)))
+        self.assertEqual(resp.context["coincidencias"]["resumen"]["conciliados"], 2)
+        self.assertEqual(resp.context["reporte"]["diferencia"], 0)
+
+    def test_pdf_y_xls_se_rechazan_con_la_lista_de_formatos(self):
+        for nombre in ("banco.pdf", "banco.xls", "banco.docx"):
+            resp = self.crear(SimpleUploadedFile(nombre, b"x"), SimpleUploadedFile("empresa.txt", self.empresa_txt.encode()))
+            self.assertEqual(Conciliacion.objects.count(), 0, nombre)
+            self.assertIn("CSV, TXT, TSV o XLSX", resp.content.decode(), nombre)
+
+    def test_archivo_demasiado_grande(self):
+        with mock.patch.object(services, "MAX_BYTES_ARCHIVO", 20):
+            resp = self.crear(SimpleUploadedFile("banco.csv", b"Fecha,Monto\n2026-10-01,1\n2026-10-02,2\n"),
+                              SimpleUploadedFile("empresa.txt", self.empresa_txt.encode()))
+        self.assertEqual(Conciliacion.objects.count(), 0)
+        self.assertIn("pesa más de", resp.content.decode())
+
+    def test_endpoint_del_rango_lee_excel(self):
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.xlsx", self.banco_xlsx)})
+        self.assertEqual((r.json()["ok"], r.json()["desde"], r.json()["hasta"]), (True, "2026-10-01", "2026-10-03"))
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.xlsx", b"no soy excel")})
+        self.assertEqual(r.status_code, 200)       # la extensión es válida; el contenido no
+        self.assertFalse(r.json()["ok"])
+        r = self.client.post("/api/rango-fechas/", {"archivo": SimpleUploadedFile("b.xls", b"x")})
+        self.assertEqual(r.status_code, 400)
+
+    def test_la_pagina_ofrece_los_formatos_nuevos(self):
+        html = self.client.get("/conciliacion/nueva/").content.decode()
+        self.assertIn('accept=".csv,.txt,.tsv,.xlsx"', html)
+        self.assertIn("CSV, TXT, TSV o XLSX", html)
+
+    def test_exporta_cuando_el_origen_es_excel(self):
+        self.crear(SimpleUploadedFile("banco.xlsx", self.banco_xlsx), SimpleUploadedFile("empresa.txt", self.empresa_txt.encode()))
+        c = Conciliacion.objects.get()
+        for formato in ("xlsx", "pdf", "csv"):
+            self.assertEqual(self.client.get(f"/conciliacion/{c.pk}/exportar/{formato}/").status_code, 200, formato)

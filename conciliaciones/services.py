@@ -1,10 +1,15 @@
 """Lectura de archivos CSV, emparejamiento de movimientos y reporte de la conciliación."""
+import codecs
 import csv
 import io
+import re
 import unicodedata
+import zipfile
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
+
+from openpyxl import load_workbook
 
 FORMATOS_FECHA = ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d/%m/%y")
 MAX_FILAS_VISTA = 1000
@@ -13,6 +18,17 @@ NIVELES = ("error", "advertencia", "sugerencia", "info")
 ETIQUETAS_LADO = {"BANCO": "Banco", "EMPRESA": "Empresa"}
 CERO = Decimal("0.00")
 CLAVES_FECHA = ("fecha", "date")
+
+# Formatos de archivo que se pueden cargar. Es la única lista: formularios, endpoint y JavaScript la usan.
+EXTENSIONES_ACEPTADAS = (".csv", ".txt", ".tsv", ".xlsx")
+FORMATOS_TEXTO = "CSV, TXT, TSV o XLSX"
+MAX_BYTES_ARCHIVO = 25 * 1024 * 1024      # tamaño máximo de un archivo subido
+MAX_FILAS_ARCHIVO = 200_000
+MAX_DESCOMPRIMIDO = 150 * 1024 * 1024     # un .xlsx es un zip: se limita lo que ocupa al descomprimirlo
+
+
+def extension_valida(nombre):
+    return (nombre or "").lower().endswith(EXTENSIONES_ACEPTADAS)
 
 
 class ErrorArchivo(Exception):
@@ -45,35 +61,90 @@ def _buscar(columnas, claves):
     return None
 
 
+_FECHA_SERIAL = re.compile(r"^\d{5}(?:\.0+)?$")
+
+
 def _fecha(texto):
-    for fmt in FORMATOS_FECHA:
-        try:
-            return datetime.strptime(texto.strip(), fmt).date()
-        except ValueError:
-            continue
+    """Interpreta una fecha. Acepta los formatos de FORMATOS_FECHA, con hora opcional
+    («2026-10-01 14:35») y el número de serie de Excel (p. ej. 46296)."""
+    t = (texto or "").strip()
+    if not t:
+        return None
+    for candidato in (t, re.split(r"[ T]", t, maxsplit=1)[0]):
+        for fmt in FORMATOS_FECHA:
+            try:
+                return datetime.strptime(candidato, fmt).date()
+            except ValueError:
+                continue
+    if _FECHA_SERIAL.match(t):
+        n = int(float(t))
+        if 20000 <= n <= 80000:           # de 1954 a 2118: descarta números que no son fechas
+            return date(1899, 12, 30) + timedelta(days=n)
     return None
 
 
-def _monto(texto):
-    t = (texto or "").strip().replace("$", "").replace(",", "").replace(" ", "")
+# Montos: el separador decimal puede ser punto («1,234.50») o coma («1.234,50»). Se decide por
+# archivo a partir de los valores que lo dejan claro; ante la duda se avisa y nunca se adivina.
+_PREFIJO = r"\(?-?\$?-?"
+_SUFIJO = r"\)?-?"
+_COMA_DECIMAL = re.compile(rf"^{_PREFIJO}(?:\d{{1,3}}(?:\.\d{{3}})+|\d+),\d{{1,2}}{_SUFIJO}$")
+_PUNTO_DECIMAL = re.compile(rf"^{_PREFIJO}(?:\d{{1,3}}(?:,\d{{3}})+|\d+)\.\d{{1,2}}{_SUFIJO}$")
+_PUNTO_MILES = re.compile(rf"^{_PREFIJO}\d{{1,3}}(?:\.\d{{3}})+{_SUFIJO}$")   # «1.234»: ¿miles o 3 decimales?
+
+
+def _limpio(texto):
+    return re.sub(r"[\s\u00a0]", "", texto or "")
+
+
+def convencion_decimal(valores):
+    """Decide si una columna de montos usa punto o coma como separador decimal.
+
+    Devuelve {"convencion": "." o ",", "coma": n, "punto": n, "ambiguos": n}. `coma` y `punto`
+    cuentan los valores que solo son válidos con esa convención; si ambos son mayores que cero la
+    columna mezcla formatos. `ambiguos` cuenta valores como «1.234» cuando no hay ninguna pista más.
+    """
+    coma = punto = miles = 0
+    for v in valores:
+        t = _limpio(v)
+        if _COMA_DECIMAL.match(t):
+            coma += 1
+        elif _PUNTO_DECIMAL.match(t):
+            punto += 1
+        elif _PUNTO_MILES.match(t):
+            miles += 1
+    return {"convencion": "," if coma > punto else ".", "coma": coma, "punto": punto,
+            "ambiguos": miles if not (coma or punto) else 0}
+
+
+def _contradice(texto, convencion):
+    """True si el valor solo es válido con la convención contraria a la del archivo."""
+    t = _limpio(texto)
+    return bool((_COMA_DECIMAL if convencion == "." else _PUNTO_DECIMAL).match(t))
+
+
+def _monto(texto, convencion="."):
+    """Convierte texto a Decimal. Acepta `$`, paréntesis o guion final como negativo y
+    separadores de miles. Devuelve None si no es un número válido y finito."""
+    t = _limpio(texto).replace("$", "")
     if not t:
         return None
     negativo = t.startswith("(") and t.endswith(")")
-    t = t.strip("()")
+    if negativo:
+        t = t[1:-1]
+    if t.endswith("-"):
+        t = "-" + t[:-1].lstrip("-")
+    t = t.replace(".", "").replace(",", ".") if convencion == "," else t.replace(",", "")
     try:
         valor = Decimal(t)
     except InvalidOperation:
+        return None
+    if not valor.is_finite():              # «NaN» o «Infinity» no son montos
         return None
     return -valor if negativo else valor
 
 
 # ------------------------------------------------------------------ lectura
-def leer_tabla(archivo):
-    """Devuelve (columnas, filas, numeros) de un CSV.
-
-    `numeros[i]` es el número de fila de `filas[i]` en el archivo original
-    (el encabezado es la fila 1). Detecta codificación y separador.
-    """
+def _bytes_de(archivo):
     try:
         archivo.open("rb")
         datos = archivo.read()
@@ -84,29 +155,175 @@ def leer_tabla(archivo):
             archivo.close()
         except Exception:
             pass
+    if len(datos) > MAX_BYTES_ARCHIVO:
+        raise ErrorArchivo(f"El archivo pesa más de {MAX_BYTES_ARCHIVO // (1024 * 1024)} MB.")
+    return datos
 
-    try:
-        texto = datos.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        texto = datos.decode("latin-1")
+
+def _decodificar(datos):
+    """Texto del archivo. Detecta UTF-8/16/32 por su marca (BOM), UTF-16 sin marca por sus bytes
+    nulos y, si no, UTF-8 o Windows-1252 (con Latin-1 como último recurso)."""
+    if datos.startswith((codecs.BOM_UTF32_LE, codecs.BOM_UTF32_BE)):
+        return datos.decode("utf-32")
+    if datos.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return datos.decode("utf-16")
+    if datos.startswith(codecs.BOM_UTF8):
+        return datos.decode("utf-8-sig")
+    muestra = datos[:400]
+    if muestra and muestra.count(b"\x00") > len(muestra) // 4:       # UTF-16 sin marca
+        codificacion = "utf-16-le" if muestra[1::2].count(b"\x00") >= muestra[0::2].count(b"\x00") else "utf-16-be"
+        try:
+            return datos.decode(codificacion)
+        except UnicodeDecodeError:
+            pass
+    for codificacion in ("utf-8", "cp1252"):
+        try:
+            return datos.decode(codificacion)
+        except UnicodeDecodeError:
+            continue
+    return datos.decode("latin-1")
+
+
+def _nombres_de_columnas(encabezado, ancho):
+    """Nombres de columna; las que no tienen encabezado se llaman «Columna N»."""
+    return [(str(encabezado[i]).strip() if i < len(encabezado) and str(encabezado[i]).strip() else f"Columna {i + 1}")
+            for i in range(ancho)]
+
+
+def _leer_texto(datos):
+    """CSV, TXT o TSV: separador detectado (`,` `;` tabulador o `|`); el encabezado es la primera fila con datos."""
+    if datos.startswith(b"%PDF"):
+        raise ErrorArchivo(f"Parece un PDF. Por ahora solo se leen archivos {FORMATOS_TEXTO}.")
+    if datos.startswith(b"\xd0\xcf\x11\xe0"):
+        raise ErrorArchivo("Parece un Excel antiguo (.xls). Guárdalo como .xlsx e inténtalo de nuevo.")
+    texto = _decodificar(datos)
     if not texto.strip():
         raise ErrorArchivo("El archivo está vacío.")
-
+    if "\x00" in texto[:4000]:
+        raise ErrorArchivo("El archivo no parece de texto (contiene caracteres nulos). "
+                           "Si viene de Excel, guárdalo como .xlsx o como CSV UTF-8.")
     try:
         dialecto = csv.Sniffer().sniff(texto[:4096], delimiters=",;\t|")
     except csv.Error:
         dialecto = csv.excel
-    filas = list(csv.reader(io.StringIO(texto), dialecto))
-    columnas = [c.strip() for c in filas[0]]
+    try:
+        filas = list(csv.reader(io.StringIO(texto), dialecto))
+    except csv.Error as e:
+        raise ErrorArchivo(f"No se pudo leer como texto delimitado: {e}")
+    if len(filas) > MAX_FILAS_ARCHIVO + 1:
+        raise ErrorArchivo(f"El archivo tiene más de {MAX_FILAS_ARCHIVO:,} filas.")
+    inicio = next((i for i, f in enumerate(filas) if any(c.strip() for c in f)), None)
+    if inicio is None:
+        raise ErrorArchivo("El archivo está vacío.")
+    columnas = [c.strip() for c in filas[inicio]]
     cuerpo, numeros = [], []
-    for n, f in enumerate(filas[1:], start=2):
+    for n, f in enumerate(filas[inicio + 1:], start=inicio + 2):
         if not any(c.strip() for c in f):
             continue
         f = [c.strip() for c in f][: len(columnas)]
         f += [""] * (len(columnas) - len(f))
         cuerpo.append(f)
         numeros.append(n)
-    return columnas, cuerpo, numeros
+    return columnas, cuerpo, numeros, []
+
+
+def _celda_a_texto(v):
+    """Valor de una celda de Excel como texto, en la forma que espera el resto del sistema:
+    fechas en ISO, números sin ceros ni ruido de coma flotante."""
+    if v is None:
+        return ""
+    if isinstance(v, datetime):
+        return v.date().isoformat()
+    if isinstance(v, date):
+        return v.isoformat()
+    if isinstance(v, bool):
+        return "Sí" if v else "No"
+    if isinstance(v, int):
+        return str(v)
+    if isinstance(v, float):
+        if v != v or v in (float("inf"), float("-inf")):
+            return ""
+        if v.is_integer():
+            return str(int(v))
+        return format(Decimal(repr(round(v, 8))), "f")
+    return str(v).strip()
+
+
+def _leer_xlsx(datos):
+    """Excel (.xlsx): primera hoja visible con datos; el encabezado es su primera fila con contenido."""
+    try:
+        with zipfile.ZipFile(io.BytesIO(datos)) as z:
+            infos = z.infolist()
+            if len(infos) > 5000 or sum(i.file_size for i in infos) > MAX_DESCOMPRIMIDO:
+                raise ErrorArchivo("El archivo de Excel es demasiado grande una vez descomprimido.")
+            if "xl/workbook.xml" not in set(z.namelist()):
+                raise ErrorArchivo("El archivo es un zip, pero no un libro de Excel (.xlsx).")
+    except zipfile.BadZipFile:
+        raise ErrorArchivo("El archivo no es un Excel (.xlsx) válido.")
+    try:
+        libro = load_workbook(io.BytesIO(datos), read_only=True, data_only=True)
+    except Exception as e:   # openpyxl lanza varios tipos de error según el daño del archivo
+        raise ErrorArchivo(f"No se pudo abrir el Excel: {e}")
+
+    try:
+        for hoja in libro.worksheets:
+            if hoja.sheet_state != "visible":
+                continue
+            try:
+                hoja.reset_dimensions()    # algunos programas guardan mal las dimensiones de la hoja
+            except Exception:
+                pass
+            crudas = []
+            for fila in hoja.iter_rows(values_only=True):
+                crudas.append(fila)
+                if len(crudas) > MAX_FILAS_ARCHIVO + 1:
+                    raise ErrorArchivo(f"La hoja tiene más de {MAX_FILAS_ARCHIVO:,} filas.")
+            textos = [[_celda_a_texto(v) for v in fila] for fila in crudas]   # el índice + 1 es el número de fila de Excel
+            if any(any(c for c in f) for f in textos):
+                break
+        else:
+            raise ErrorArchivo("El libro no tiene hojas visibles con datos.")
+        notas = []
+        if len(libro.worksheets) > 1:
+            notas.append(("info", f"Se leyó la hoja «{hoja.title}»",
+                          f"El libro tiene {len(libro.worksheets)} hojas; se usa la primera visible con datos."))
+    finally:
+        libro.close()
+
+    inicio = next(i for i, f in enumerate(textos) if any(f))
+    ancho = max((max((j for j, c in enumerate(f) if c), default=-1) + 1 for f in textos), default=0)
+    columnas = _nombres_de_columnas(textos[inicio], ancho)
+    cuerpo, numeros = [], []
+    for i, f in enumerate(textos[inicio + 1:], start=inicio + 2):
+        if not any(f):
+            continue
+        cuerpo.append((f + [""] * ancho)[:ancho])
+        numeros.append(i)
+    return columnas, cuerpo, numeros, notas
+
+
+def leer_tabla_con_notas(archivo):
+    """Devuelve (columnas, filas, numeros, notas) de un archivo CSV, TXT, TSV o XLSX.
+
+    `numeros[i]` es el número de fila de `filas[i]` en el archivo original (el de Excel, si es
+    Excel). El formato se decide por el contenido, no por la extensión. `notas` son avisos
+    informativos sobre cómo se leyó (por ejemplo, qué hoja de Excel se usó).
+    """
+    datos = _bytes_de(archivo)
+    if datos.startswith(b"PK\x03\x04"):
+        return _leer_xlsx(datos)
+    return _leer_texto(datos)
+
+
+def leer_tabla(archivo):
+    """Como `leer_tabla_con_notas`, pero sin las notas."""
+    return leer_tabla_con_notas(archivo)[:3]
+
+
+def _columnas_leidas(columnas, maximo=8):
+    """Texto con las columnas que se leyeron, para que el usuario vea qué entendió el sistema."""
+    visibles = [c for c in columnas if c][:maximo]
+    return f"Columnas leídas: {', '.join(visibles)}{'…' if len(columnas) > maximo else ''}." if visibles else ""
 
 
 class ArchivoEnMemoria:
@@ -137,7 +354,8 @@ def rango_fechas(archivo):
     columnas, filas, _ = leer_tabla(archivo)
     i_fecha = _buscar(columnas, CLAVES_FECHA)
     if i_fecha is None:
-        raise ErrorArchivo("No se encontró una columna de fecha (se busca un encabezado como «Fecha»).")
+        raise ErrorArchivo("No se encontró una columna de fecha (se busca un encabezado como «Fecha»). "
+                           + _columnas_leidas(columnas))
     fechas = [f for f in (_fecha(fila[i_fecha]) for fila in filas) if f]
     if not fechas:
         raise ErrorArchivo(f"No se pudo interpretar ninguna fecha de la columna «{columnas[i_fecha]}».")
@@ -173,10 +391,12 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
 
     principal, *complementarios = archivos
     try:
-        columnas, filas_principal, nums_principal = leer_tabla(principal.archivo)
+        columnas, filas_principal, nums_principal, notas = leer_tabla_con_notas(principal.archivo)
     except ErrorArchivo as e:
         res["error"] = f"{principal.nombre}: {e}"
         return res
+    for nivel, titulo, detalle in notas:
+        avisar(nivel, f"{principal.nombre}: {titulo}", detalle)
 
     i_fecha = _buscar(columnas, CLAVES_FECHA)
     i_monto = _buscar(columnas, ("monto", "importe", "amount"))
@@ -196,7 +416,7 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
     if i_fecha is None:
         avisar("advertencia", "No se encontró la columna de fecha",
                "No se puede filtrar por rango ni emparejar por fecha. "
-               "Revisa que el archivo tenga un encabezado como «Fecha».")
+               "Revisa que el archivo tenga un encabezado como «Fecha». " + _columnas_leidas(columnas))
     if not calcula:
         avisar("advertencia", "No se encontró la columna de monto",
                "Se busca «monto» o «importe», o el par «cargo» y «abono». "
@@ -211,10 +431,12 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
     claves = [_norm(c) for c in columnas]
     for comp in complementarios:
         try:
-            cols, filas, nums = leer_tabla(comp.archivo)
+            cols, filas, nums, notas = leer_tabla_con_notas(comp.archivo)
         except ErrorArchivo as e:
             avisar("advertencia", f"Se omitió {comp.nombre}", str(e))
             continue
+        for nivel, titulo, detalle in notas:
+            avisar(nivel, f"{comp.nombre}: {titulo}", detalle)
         indice = {_norm(c): i for i, c in enumerate(cols)}
         mapa = [indice.get(k) for k in claves]
         if all(m is None for m in mapa):
@@ -246,6 +468,28 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
                "Si un complementario repite movimientos del principal, los totales se duplican. "
                "Revisa que solo aporte información nueva.")
 
+    # Separador decimal de los montos: se decide por archivo y nunca en silencio
+    convenciones = {}
+    if calcula:
+        columnas_monto = [i_monto] if usa_monto else [i_abono, i_cargo]
+        valores_por_archivo = defaultdict(list)
+        for nombre, _, _, fila, _ in registros:
+            valores_por_archivo[nombre].extend(fila[i] for i in columnas_monto)
+        for nombre, valores in valores_por_archivo.items():
+            c = convencion_decimal(valores)
+            convenciones[nombre] = c["convencion"]
+            if c["coma"] and c["punto"]:
+                avisar("advertencia", f"{nombre}: los montos mezclan formatos",
+                       f"Hay {c['coma']} valor(es) con coma decimal (1.234,50) y {c['punto']} con punto decimal (1,234.50). "
+                       f"Se usa el formato mayoritario («{c['convencion']}») y las filas que no lo siguen se reportan como no interpretables.")
+            elif c["coma"]:
+                avisar("info", f"{nombre}: montos con coma decimal",
+                       "Los montos usan coma decimal y punto de miles (por ejemplo, 1.234,50 = 1234.50); se interpretaron así.")
+            elif c["ambiguos"]:
+                avisar("advertencia", f"{nombre}: montos ambiguos",
+                       f"Hay {c['ambiguos']} valor(es) como «1.234» que podrían usar el punto como separador de miles. "
+                       "Se interpretaron como decimales; revísalos.")
+
     visibles, problemas = [], []
     fechas_principal = []
     ingresos = egresos = CERO
@@ -264,11 +508,18 @@ def analizar(archivos, desde, hasta, lado="BANCO"):
         visibles.append({"archivo": nombre, "principal": es_principal, "celdas": fila})
         if not calcula:
             continue
+        conv = convenciones.get(nombre, ".")
+        valores = (fila[i_monto],) if usa_monto else (fila[i_abono], fila[i_cargo])
+        contradictorio = next((v for v in valores if _contradice(v, conv)), None)
+        if contradictorio is not None:
+            problemas.append(f"{nombre}, fila {numero}: el monto «{contradictorio}» usa un formato distinto al del resto del archivo")
+            continue
         if usa_monto:
-            m = _monto(fila[i_monto])
+            m = _monto(fila[i_monto], conv)
         else:
-            ab, ca = _monto(fila[i_abono]), _monto(fila[i_cargo])
-            m = None if ab is None and ca is None else (ab or 0) - (ca or 0)
+            ab, ca = _monto(fila[i_abono], conv), _monto(fila[i_cargo], conv)
+            invalido = (_limpio(fila[i_abono]) and ab is None) or (_limpio(fila[i_cargo]) and ca is None)
+            m = None if invalido or (ab is None and ca is None) else (ab or 0) - (ca or 0)
         if m is None:
             problemas.append(f"{nombre}, fila {numero}: monto inválido o vacío")
             continue
