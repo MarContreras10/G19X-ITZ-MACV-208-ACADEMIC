@@ -6,11 +6,28 @@
 <title>{% block title %}Conciliación bancaria{% endblock %}</title>
 <style>
   *{box-sizing:border-box}
-  body{font-family:system-ui,sans-serif;margin:0;background:#f3f5f9;color:#1f2937}
-  header{background:#1f3a5f;color:#fff;padding:14px 24px;display:flex;justify-content:space-between;align-items:center}
+  body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f3f5f9;color:#1f2937}
+  
+  /* HEADER */
+  header{background:#1f3a5f;color:#fff;padding:16px 32px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 6px rgba(0,0,0,0.08)}
+  
+  /* MARCA */
+  .brand{display:flex;align-items:baseline;text-decoration:none;color:#fff;gap:6px}
+  .brand-text{font-size:28px;font-weight:800;letter-spacing:-0.03em;}
+  .brand-text span{color:#60a5fa;font-weight:800}
+  .brand-tag{font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:#94a3b8;margin-left:14px;border-left:1px solid #334155;padding-left:14px;display:none}
+  
+  /* ÁREA DE USUARIO Y BOTÓN SALIR */
+  .user-area{display:flex;align-items:center;gap:16px}
+  .user-badge{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:999px;padding:6px 16px 6px 12px;font-size:15px;font-weight:500;transition:background 0.2s}
+  .user-badge:hover{background:rgba(255,255,255,0.15)}
+  .user-badge::before{content:"👤";font-size:16px;opacity:0.8}
+  
   header a,header button{color:#fff;text-decoration:none}
   header form{display:inline;margin:0}
-  header button{background:none;border:1px solid #fff8;border-radius:6px;padding:4px 12px;cursor:pointer;margin-left:12px}
+  header button{background:none;border:1px solid rgba(255,255,255,0.3);border-radius:6px;padding:6px 14px;cursor:pointer;font-size:13px;font-weight:500;transition:all 0.2s}
+  header button:hover{background:#fff;color:#1f3a5f;border-color:#fff}
+  
   main{max-width:980px;margin:28px auto;padding:0 16px}
   main.wide{max-width:1500px}
   .card{background:#fff;border-radius:10px;padding:20px;margin-bottom:18px;box-shadow:0 1px 3px #0002}
@@ -27,14 +44,24 @@
   .errorlist{color:#b42318;margin:4px 0;padding:0;list-style:none;font-size:13px}
   .muted{color:#6b7280;font-size:14px}
   .top{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}
-  @media(max-width:720px){.row{grid-template-columns:1fr}}
+  
+  @media(min-width:768px){.brand-tag{display:inline-block}}
+  @media(max-width:720px){.row{grid-template-columns:1fr}header{padding:16px}.user-badge span:not(.status-dot){display:none}.user-badge{padding:6px 10px}.brand-text{font-size:24px}}
 </style>
 </head>
 <body>
 <header>
-  <a href="{% url 'home' %}"><strong>Conciliación bancaria</strong></a>
+  <a href="{% url 'home' %}" class="brand">
+    <span class="brand-text">Autocon<span>bank</span></span>
+    <span class="brand-tag">Conciliación</span>
+  </a>
+  
   {% if user.is_authenticated %}
-  <div>{{ user.get_username }}
+  <div class="user-area">
+    <div class="user-badge" title="Sesión activa">
+      {{ user.get_username }}
+      <span class="status-dot"></span>
+    </div>
     <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button>Salir</button></form>
   </div>
   {% endif %}
