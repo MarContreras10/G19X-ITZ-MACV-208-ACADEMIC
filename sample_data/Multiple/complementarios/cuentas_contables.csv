@@ -1,0 +1,7 @@
+Cuenta,Nombre,Tipo
+1101,Bancos,Activo
+1201,Clientes,Activo
+2101,Proveedores,Pasivo
+6101,Sueldos y salarios,Gasto
+6102,Renta,Gasto
+6201,Comisiones bancarias,Gasto

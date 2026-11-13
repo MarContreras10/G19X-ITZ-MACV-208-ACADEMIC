@@ -32,7 +32,7 @@ Conciliar a mano es lento y propenso a errores:
 
 **Dentro del alcance (producto completo)**
 - Carga de archivos principales y complementarios por cada lado.
-- Lectura de CSV, Excel (.xlsx) y, en etapas posteriores, PDF con texto e imágenes escaneadas.
+- Lectura de CSV, TXT, TSV y Excel (.xlsx) y, en etapas posteriores, PDF con texto, imágenes escaneadas y formatos bancarios estándar (SWIFT MT940, ISO 20022 CAMT.053 y OFX).
 - Mapeo de columnas (sugerido y manual), emparejamiento, revisión manual, reporte y exportación.
 
 **Fuera del alcance (por ahora)**
@@ -76,7 +76,7 @@ Iniciar sesión
 - **RF-05** El usuario debe poder cargar un archivo principal y varios complementarios. — **[Hecho]**
 - **RF-06** El usuario debe poder cargar un archivo principal y varios complemetnarios en caso de ser necesario. — **[Hecho]** (es el mismo requerimiento que RF-05).
 - **RF-07** El sistema debe abisar si un archivo complementario repite filas ya existentes o tiene columnas que no coinciden con el principal — **[Hecho]** Avisa filas repetidas entre archivos y columnas que no coinciden; no excluye las repetidas de los totales.
-- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.). — **[Parcial]** Se leen CSV, TXT, TSV y XLSX. PDF, SWIFT (MT940, CAMT.053, OFX) e imágenes quedan pospuestos porque necesitan extractos reales para validarse.
+- **RF-08** El sistema debe aceptar distintos tipos de archivos (CSV, PDF, SWIFT, XLSX, etc.). — **[Parcial]** Se leen CSV, TXT, TSV y XLSX. PDF, imágenes y los formatos bancarios estándar (SWIFT MT940, ISO 20022 CAMT.053 y OFX) quedan pospuestos porque necesitan extractos reales para validarse.
 
 ### 7.3 Interpretacion de datos
 - **RF-09** El sistema debe detectar automaticamente codificacion, separador, formato de fecha y formato numerico. — **[Parcial]** Detecta codificación (UTF-8, UTF-16, Windows-1252), separador, el separador decimal de los montos (punto o coma, decidido por archivo; los casos ambiguos se avisan) y varios formatos de fecha (con hora o número de serie de Excel). Falta el formato MM/DD/AAAA y distinguir día de mes.
@@ -118,12 +118,12 @@ Todo archivo, sin importar su origen, se transforma a un **movimiento normalizad
 | `monto` | Decimal con signo: positivo = ingreso, negativo = egreso |
 | `descripcion` | Texto normalizado (sin acentos, minúsculas, sin ruido) |
 | `referencia` | Folio, número de factura, clave de rastreo, etc. |
-| `estado` | `pendiente` · `sugerido` · `conciliado` |
+| `estado` | `pendiente` · `sugerido` · `conciliado` · `manual` |
 | `conciliacion` | Grupo al que pertenece, si lo hay |
 
 Esto es lo que permite comparar archivos que "no son los mismos": se comparan movimientos normalizados, no archivos.
 
-> **Estado de implementación:** hoy los movimientos se normalizan en memoria cada vez que se abre la conciliación y no se guardan en la base de datos (incremento 1 de la hoja de ruta). Cada movimiento se identifica por su **archivo y su número de fila** (el encabezado es la fila 1), y así se guardan las conciliaciones manuales. El estado (`pendiente`, `sugerido`, `conciliado`, y `manual`) se calcula al emparejar.
+> **Estado de implementación:** hoy los movimientos se normalizan en memoria cada vez que se abre la conciliación y no se guardan en la base de datos (incremento 1 de la hoja de ruta). Cada movimiento se identifica por su **archivo y su número de fila** (el mismo número de fila que se ve en el archivo o en Excel), y así se guardan las conciliaciones manuales. El estado (`pendiente`, `sugerido`, `conciliado`, y `manual`) se calcula al emparejar.
 
 ## 9. Algoritmos de análisis
 
@@ -146,9 +146,9 @@ Además de las capas, las conciliaciones manuales se aplican primero y sus movim
 - Si no hay candidatos, queda **pendiente** y se clasifica en el reporte.
 
 **Detección automática de estructura**
-- Columnas: por nombre de encabezado (sinónimos) y por el contenido (¿parece fecha?, ¿parece monto?).
-- Fechas: prueba de varios formatos y se elige el que interpreta más filas.
-- Números: manejo de separadores de miles/decimales, paréntesis como negativo y símbolos de moneda.
+- Columnas: por nombre de encabezado (sinónimos) — **[Hecho]**; por el contenido (¿parece fecha?, ¿parece monto?) — **[Pendiente]**.
+- Fechas: se prueba una lista de formatos (AAAA-MM-DD, DD/MM/AAAA, DD-MM-AAAA y DD/MM/AA, con hora opcional, y el número de serie de Excel) — **[Hecho]**; elegir el formato que interpreta más filas y distinguir día de mes (por ejemplo, MM/DD/AAAA) — **[Pendiente]**.
+- Números: separadores de miles, punto o coma decimal (decidido por archivo y con aviso ante la duda), paréntesis o guion final como negativo y el símbolo `$` — **[Hecho]**; otros símbolos de moneda — **[Pendiente]**.
 
 ## 10. Requerimientos no funcionales
 
@@ -172,10 +172,10 @@ Además de las capas, las conciliaciones manuales se aplican primero y sus movim
 
 | Riesgo | Mitigación |
 |---|---|
-| Formatos muy distintos entre bancos | Mapeo manual de columnas siempre disponible |
+| Formatos muy distintos entre bancos | Mapeo manual de columnas *(pendiente: hoy las columnas se reconocen solo por el nombre del encabezado)* |
 | Lectura incorrecta de PDF/imagen | Dejar esos formatos para una etapa posterior y exigir revisión |
 | Falsos emparejamientos | Puntaje de confianza, capas conservadoras y revisión de casos ambiguos |
-| Archivos complementarios que duplican filas | Detección de duplicados antes de calcular totales |
+| Archivos complementarios que duplican filas | Aviso de filas repetidas entre archivos *(hoy siguen sumando en los totales; excluirlas está pendiente)* |
 | Datos financieros sensibles | Autenticación, permisos por usuario, almacenamiento seguro |
 
 ## 13. Hoja de ruta (por incrementos pequeños)
@@ -189,6 +189,6 @@ Además de las capas, las conciliaciones manuales se aplican primero y sus movim
 7. **Conciliación manual** y deshacer. — **[Hecho]** Faltan rechazar sugerencias y registrar el deshacer.
 8. **Excel (.xlsx)** como formato de entrada. — **[Hecho]** Primera hoja visible con datos; el encabezado es su primera fila con contenido.
 9. **Exportación del reporte.** — **[Hecho]** Excel, PDF y CSV.
-10. Etapas posteriores: 1 a N, PDF/OCR, roles y aprobación. — **[Pendiente]**
+10. Etapas posteriores: 1 a N automático, PDF/OCR, roles y aprobación. — **[Pendiente]**
 
 **Se implementó además, sin estar en la hoja de ruta:** rango de fechas automático a partir del archivo principal; conciliación manual de 1 a N y N a N; caja de avisos del reporte (errores, advertencias, sugerencias e informativos); cuadre de la diferencia (balance) en las exportaciones; lectura de TXT y TSV, de archivos UTF-16 y de montos con coma decimal (sin interpretar en silencio un formato equivocado); límites de tamaño y validación del contenido de los archivos subidos; y configuración sensible fuera del código mediante variables de entorno.

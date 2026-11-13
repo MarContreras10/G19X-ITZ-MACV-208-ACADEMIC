@@ -32,7 +32,7 @@ Demostrar que el sistema puede **comparar archivos con estructuras distintas, em
 ### Fuera del MVP
 
 - Distintos archivos utilizados para conciliaciones bancarias.
-- Emparejamientos 1 a N y N a N.
+- Emparejamiento **automático** de 1 a N y N a N (la conciliación manual de varios contra varios sí está disponible).
 - Aprendizaje automático.
 - Roles, aprobación y cierre de periodo.
 - Multi-moneda y conexión con APIs bancarias.
@@ -80,7 +80,7 @@ Cada incremento termina con algo que se puede **ejecutar y probar** antes de pas
 **Capas de emparejamiento (de la más estricta a la más flexible):**
 1. Monto exacto + misma fecha + misma referencia.
 2. Monto exacto + fecha en tolerancia + referencia coincidente.
-3. Monto exacto + fecha en tolerancia, sin referencia.
+3. Monto exacto + fecha en tolerancia, sin referencia (se aplica en dos pasos: primero la misma fecha y después la fecha dentro de la tolerancia).
 
 **Decisión:**
 - Un solo candidato claro → **conciliado**.
@@ -137,7 +137,7 @@ El MVP se considera terminado cuando se cumplen los criterios de aceptación de 
 | **Parciales (2)** | 2 · Selector manual de columnas y duplicados · 6 · Reporte de pendientes (falta la causa probable) |
 | **Pendientes (1)** | 1 · Persistir movimientos |
 
-**Criterios de aceptación:** 4 de 8 cumplidos; los otros 4 están en parcial o pendiente (ver sección 6).
+**Criterios de aceptación:** 5 de 8 cumplidos; los otros 3 están en parcial o pendiente (ver sección 6).
 
 **Pruebas automáticas:** 97, todas pasan.
 

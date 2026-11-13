@@ -17,16 +17,16 @@ Aplicación web hecha con Django que compara los movimientos de un **extracto ba
 
 ## Requisitos
 
-- **Python 3.10 o superior.**
+- **Python 3.10 o superior.** Las dependencias fijadas se instalan en Python 3.10 a 3.14; el desarrollo y las pruebas automáticas se ejecutaron en 3.12.
 - Las dependencias están fijadas en `requirements.txt` (Django 5.2 LTS, python-dotenv, openpyxl, defusedxml y reportlab), por lo que todos instalan las mismas versiones con las que se probó el proyecto.
-- Git (opcional, para clonar el repositorio).
+- Git (opcional, para clonar el repositorio; ver «Clonar el repositorio y probarlo en otro equipo»).
 
 ## Instalación y ejecución
 
 Los comandos son para **CMD de Windows**. En Linux o macOS cambia solo la activación del entorno virtual (se indica abajo).
 
 ```cmd
-:: 1. Entrar a la carpeta del proyecto (donde está manage.py)
+:: 1. Entrar a la carpeta del proyecto (donde está manage.py). Si aún no la tienes, clónala primero (ver «Clonar el repositorio...»)
 cd ruta\a\conciliacion_bancaria
 
 :: 2. Crear y activar el entorno virtual
@@ -144,7 +144,7 @@ El **balance** cuadra la diferencia: *neto del banco − partidas sin conciliar 
 python manage.py test conciliaciones
 ```
 
-(Requiere que exista tu archivo `.env` con la clave configurada.)
+(Requiere que exista tu archivo `.env` con la clave configurada.) Al final debe aparecer `OK`. Para ejecutar solo una parte: `python manage.py test conciliaciones.tests.ExportacionTests` (una clase) o `python manage.py test conciliaciones.tests.MontosTests.test_coma_decimal` (una prueba).
 
 Son **97 pruebas**: lectura de CSV, TXT, TSV y Excel (codificaciones, separadores, hojas, filas y columnas vacías, archivos dañados o falsos, límites de tamaño), montos con punto y coma decimal, emparejamiento (tolerancia, ambigüedad, referencia, unicidad), alertas del reporte, conciliación manual (permisos, validaciones, deshacer, efecto de reemplazar archivos), rango de fechas automático y exportación (Excel, PDF y CSV).
 
@@ -165,7 +165,7 @@ La carpeta `sample_data/` contiene:
 
 **Rango de fechas base: del 01/10/2026 al 31/10/2026**, en banco y en empresa.
 
-> Con el rango automático, `banco.csv` llega hasta el 02/11/2026 (incluye la fila fuera de rango). Para reproducir los escenarios 1 a 9, escribe 01/10–31/10 a mano; el sistema mostrará un aviso de que el rango no cubre todo el archivo principal del banco.
+> Con el rango automático, `banco.csv` llega hasta el 02/11/2026 (incluye la fila fuera de rango). Para reproducir los escenarios 1 a 3, 6, 9 y 11 a 13, escribe 01/10–31/10 a mano; el sistema mostrará un aviso de que el rango no cubre todo el archivo principal del banco.
 
 | # | Archivos | Rangos (banco / empresa) | Resultado esperado |
 |---|---|---|---|
@@ -202,7 +202,7 @@ La carpeta `sample_data/` contiene:
 ```
 conciliacion_bancaria/
 ├── manage.py
-├── requirements.txt             # Dependencias con versión fija (Django, python-dotenv, openpyxl, reportlab)
+├── requirements.txt             # Dependencias con versión fija (Django, python-dotenv, openpyxl, defusedxml, reportlab)
 ├── .env.example                 # Plantilla de configuración (se sube a Git)
 ├── .env                         # Tu configuración real (NO se sube a Git)
 ├── config/                      # Configuración de Django (settings, urls)
@@ -218,22 +218,55 @@ conciliacion_bancaria/
 │   └── templates/
 │       ├── registration/login.html
 │       └── conciliaciones/      # base, home, conciliacion y componentes (_*.html)
-├── sample_data/                 # CSV de ejemplo
+├── sample_data/                 # Archivos de ejemplo (CSV, TXT y XLSX)
 └── media/                       # Archivos subidos (se genera solo)
 ```
 
-## Para subir a Git
+## Clonar el repositorio y probarlo en otro equipo
 
-Crea un `.gitignore` en la raíz con:
+Requiere Python 3.10 o superior y Git instalados en ese equipo.
 
+### Con Git
+
+```cmd
+git clone https://github.com/MarContreras10/G19X-ITZ-MACV-208-ACADEMIC.git
 ```
-.venv/
-__pycache__/
-*.pyc
-db.sqlite3
-media/
-.env
+
+Después sigue **Instalación y ejecución** desde el paso 2 (el paso 1 ya lo hiciste al entrar a la carpeta).
+
+### Sin Git (copiar la carpeta)
+
+Copia la carpeta completa, o un `.zip`, **sin** estas carpetas y archivos: `.venv`, `__pycache__`, `media`, `db.sqlite3` y `.env`. Luego sigue **Instalación y ejecución** desde el paso 2.
+
+### Qué viaja y qué hay que crear en cada equipo
+
+| Viaja con el repositorio | Hay que crearlo en cada equipo |
+|---|---|
+| El código, `requirements.txt`, la plantilla `.env.example` y la carpeta `sample_data/` con los archivos de ejemplo | El entorno virtual `.venv` (paso 2), el `.env` con tu propia clave (pasos 4 y 5), la base de datos (`migrate`, paso 6) y el usuario (`createsuperuser`, paso 7) |
+
+Las conciliaciones ya hechas y los archivos subidos (`db.sqlite3` y `media/`) **no viajan**: en el otro equipo se empieza con la base vacía y se vuelven a crear con los archivos de `sample_data/`. Nunca subas tu `.env` al repositorio.
+
+### Comprobar que todo quedó bien
+
+1. `python manage.py check` debe responder `System check identified no issues`.
+2. `python manage.py test conciliaciones` debe terminar en `OK`.
+3. Inicia el servidor (`python manage.py runserver`), entra con tu usuario y repite el escenario 1 de la sección *Pruebas con los datos de ejemplo*.
+
+### Actualizar un equipo que ya tiene el repositorio
+
+```cmd
+git pull
+pip install -r requirements.txt
+python manage.py migrate
 ```
+
+### Errores frecuentes al preparar un equipo nuevo
+
+| Mensaje | Causa y solución |
+|---|---|
+| `ModuleNotFoundError: No module named 'dotenv'` (o `openpyxl`, `reportlab`) | Faltan las dependencias. Con el entorno virtual activado: `pip install -r requirements.txt`. |
+| `ImproperlyConfigured: Falta la variable de entorno DJANGO_SECRET_KEY` | No existe el archivo `.env`. Haz los pasos 4 y 5 de la instalación. |
+| `OperationalError: no such table: auth_user` | Falta crear la base de datos: `python manage.py migrate`. |
 
 ## Limitaciones conocidas
 
@@ -252,5 +285,3 @@ media/
 
 - `PRD_conciliacion_bancaria.md`: visión y requerimientos de producto.
 - `MVP_conciliacion_bancaria.md`: alcance del MVP e incrementos de desarrollo.
-- `Requerimientos_conciliacion_bancaria.docx`: requerimientos funcionales y no funcionales.
-- `conciliacion_bancaria.sql`: esquema objetivo de la base de datos.
